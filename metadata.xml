@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+    <name>szx_bili_danmuji</name>
+    <directory>szx_bili_danmuji</directory>
+    <id>3034585714</id>
+    <description>这是一个能直接在游戏显示b站直播间弹幕的mod，需要前置mod：IsaacSocket</description>
+    <version>1.2</version>
+    <visibility>Public</visibility>
+    <tag id="Lua"/>
+    <tag id="Graphics"/>
+</metadata>
