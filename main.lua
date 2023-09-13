@@ -1,3 +1,8 @@
+-- global variables
+szxDanmuji = {}
+szxDanmuji.danmuTable = {}
+szxDanmuji.danmuCommandOn = false
+
 -- import the zzlib library
 local zzlib = require("zzlib")
 local json = require("json")
@@ -22,11 +27,12 @@ end
 loadFont()
 
 -- text variables
-local modVersion = "三只熊弹幕姬v1.1"
+local modVersion = "三只熊弹幕姬v1.2"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instuctionText1 = "在任何情况下"
 local instuctionText2 = "按 [LCtrl + z] 即可重置连接"
 local instuctionText3 = "按 [LCtrl + x] 开关弹幕姬"
+local instuctionText4 = "按 [LAlt + x] 开关弹幕互动 (观众发送弹幕'生成c1'会生成1号道具')"
 
 local address = "wss://broadcastlv.chat.bilibili.com:443/sub"
 
@@ -44,10 +50,52 @@ local danmujiOn = true
 local sequence = 1
 local timer = 0
 local roomLatencyTimer = 0
+local needAnimate = {}
 
 --danmu variables
 local curDanmu = {"", "", ""}
 local speechTimer = 0
+
+local function cloneTable(originalTable)
+	local clone = {}
+	for key, value in pairs(originalTable) do
+		if type(value) == "table" then
+			clone[key] = cloneTable(value)
+		else
+			clone[key] = value
+		end
+	end
+	return clone
+end
+
+local itemOrderMap = cloneTable(require('./constants/itemOrderMap'))
+local codeCommandMapTable = {
+    ["c"] = {"spawn 5.100.", false},
+    ["t"] = {"spawn 5.350.", false},
+    ["T"] = {"spawn 5.350.", true},
+    ["k"] = {"spawn 5.300.", false}
+}
+
+local function elementInList(n, targetList)
+    for _, v in ipairs(targetList) do
+        if n == v then
+            return true
+        end
+    end
+    return false
+end
+
+local function executeAnimation(n)
+	local playerNum = game:GetNumPlayers()
+	for i = 0, playerNum - 1 do
+		local player = Isaac.GetPlayer(i)
+		if n == 1 then
+			player:AnimateHappy()
+		elseif n == 2 then
+			player:AnimateSad()
+		end
+	end
+end
 
 local function displayTitle()
     font:DrawStringUTF8(modVersion, 275, 193, KColor(1, 1, 1, 1), 0, false)
@@ -55,6 +103,7 @@ local function displayTitle()
     font:DrawStringUTF8(instuctionText1, 60, 168, KColor(1, 0.75, 0, 1), 0, false)
     font:DrawStringUTF8(instuctionText2, 60, 193, KColor(1, 0.75, 0, 1), 0, false)
     font:DrawStringUTF8(instuctionText3, 60, 218, KColor(1, 0.75, 0, 1), 0, false)
+    font:DrawStringUTF8(instuctionText4, 60, 243, KColor(1, 0.75, 0, 1), 0, false)
 end
 
 local function getCurDanmu(output)
@@ -65,6 +114,9 @@ local function getCurDanmu(output)
         curDanmu[1] = messageTable.info[2]
         curDanmu[2] = messageTable.info[3][2]
         curDanmu[3] = ""
+        if szxDanmuji.danmuCommandOn then
+            table.insert(szxDanmuji.danmuTable, curDanmu[1])
+        end
     elseif commandType == "POPULARITY_RED_POCKET_NEW" then --留言红包
         local data = messageTable.data
         curDanmu[1] = "送出了1个红包[" .. data.price .. "金电池]"
@@ -186,14 +238,125 @@ local function CallbackOnError(message)
     speechTimer = 150
 end
 
+local function updateItemTables()
+	local itemConfig = Isaac.GetItemConfig()
+	local insertIndexCollectible = 0
+	local insertIndexTrinket = 0
+	local insertIndexCard = 0
+	for j, item in ipairs(itemOrderMap) do
+		if item == "c732" then
+			insertIndexCollectible = j + 1
+			break
+		end
+	end
+	for i = 1, 3 do
+		local startEndNumTable = {{10000, 733}, {2000, 190}, {1000, 98}}
+		for itemIndex = startEndNumTable[i][1], startEndNumTable[i][2], -1 do
+			local item = nil
+			if i == 1 then
+				item = itemConfig:GetCollectible(itemIndex)
+			elseif i == 2 then
+				item = itemConfig:GetTrinket(itemIndex)
+			elseif i == 3 then
+				item = itemConfig:GetCard(itemIndex)
+			end
+			if item ~= nil then
+				local id = item.ID
+				local code = ""
+				if i == 1 then
+					code = "c" .. id
+				elseif i == 2 then
+					code = "t" .. id
+				elseif i == 3 then
+					code = "k" .. id
+				end
+				if i == 1 then
+					table.insert(itemOrderMap, insertIndexCollectible, code)
+				elseif i == 2 then
+					table.insert(itemOrderMap, insertIndexTrinket, code)
+				elseif i == 3 then
+					table.insert(itemOrderMap, insertIndexCard, code)
+				end
+			end
+		end
+		if i == 1 then
+			for j, item in ipairs(itemOrderMap) do
+				if item  == "t189" then
+					insertIndexTrinket = j + 1
+					break
+				end
+			end
+		elseif i == 2 then
+			for j, item in ipairs(itemOrderMap) do
+				if item  == "k97" then
+					insertIndexCard = j + 1
+					break
+				end
+			end
+		end
+	end
+end
+
+local function executeDanmuCommand(str)
+    if #str > 7 then
+        if str:sub(1, 6) == "生成" then
+            local code = str:sub(7)
+            if elementInList(code:lower(), itemOrderMap) then
+                local prefix = code:sub(1, 1)
+                local subType = code:sub(2)
+                if codeCommandMapTable[prefix][2] then
+                    subType = subType + 32768
+                end
+                local curCommand = codeCommandMapTable[prefix][1] .. subType
+                Isaac.ExecuteCommand(curCommand)
+            end
+        end
+    end
+end
+
+local function onGameStart(_, IsContinued)
+    needAnimate = {false, false}
+    szxDanmuji.danmuTable = {}
+    updateItemTables()
+end
+
 local function onUpdate()
     if speechTimer > 0 then
         speechTimer = speechTimer - 1
     end
+    if #szxDanmuji.danmuTable > 0 then
+        while #szxDanmuji.danmuTable ~= 0 do
+            executeDanmuCommand(szxDanmuji.danmuTable[1])
+            table.remove(szxDanmuji.danmuTable, 1)
+        end
+    end
+    --animate happy or sad
+	for i = 1, #needAnimate do
+		if needAnimate[i] then
+			executeAnimation(i)
+			needAnimate[i] = false
+		end
+	end
 end
 
 local function onRender(_)
     local isCtrlPressed = Input.IsButtonPressed(Keyboard.KEY_LEFT_CONTROL, 0)
+    local isAltPressed = Input.IsButtonPressed(Keyboard.KEY_LEFT_ALT, 0)
+    if isAltPressed and Input.IsButtonTriggered(Keyboard.KEY_X, 0) then
+        szxDanmuji.danmuCommandOn = not szxDanmuji.danmuCommandOn
+        if szxDanmuji.danmuCommandOn then
+            needAnimate[1] = true
+            curDanmu[1] = "例：生成c1 生成t2 生成T3 生成k4"
+            curDanmu[2] = ""
+            curDanmu[3] = {"弹幕互动打开", 2}
+        else
+            needAnimate[2] = true
+            curDanmu[1] = ""
+            curDanmu[2] = ""
+            curDanmu[3] = {"弹幕互动关闭", 1}
+        end
+        speechTimer = 150
+    end
     if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_X, 0) then
         if ws ~= nil then
             closeWebSocket()
@@ -331,5 +494,6 @@ local function onRender(_)
     end
 end
 
+mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, onGameStart)
 mod:AddCallback(ModCallbacks.MC_POST_UPDATE, onUpdate)
 mod:AddCallback(ModCallbacks.MC_POST_RENDER, onRender)
