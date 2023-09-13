@@ -32,7 +32,7 @@ v1.1更新：
 -更改了用户名显示的文本颜色为金色
 -修复了部分用户名无法显示或者显示为nil的问题
 -修复了重置连接可能出现的衔接问题</description>
-    <version>1.4</version>
+    <version>1.5</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Graphics"/>

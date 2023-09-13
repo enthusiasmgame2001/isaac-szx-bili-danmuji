@@ -114,6 +114,7 @@ local function getCurDanmu(output)
         curDanmu[1] = messageTable.info[2]
         curDanmu[2] = messageTable.info[3][2]
         curDanmu[3] = ""
+        speechTimer = 600
         if szxDanmuji.danmuCommandOn then
             table.insert(szxDanmuji.danmuTable, curDanmu[1])
         end
@@ -122,17 +123,20 @@ local function getCurDanmu(output)
         curDanmu[1] = "送出了1个红包[" .. data.price .. "金电池]"
         curDanmu[2] = data.uname
         curDanmu[3] = ""
+        speechTimer = 600
     elseif commandType == "GUARD_BUY" then --上舰
         local data = messageTable.data
         local guardNameTable = {"总督", "提督", "舰长"}
         curDanmu[1] = "开通了" .. data.num .. "个月" .. guardNameTable[data.guard_level]
         curDanmu[2] = messageTable.data.username
         curDanmu[3] = ""
+        speechTimer = 600
     elseif commandType == "SUPER_CHAT_MESSAGE" then --醒目留言
         local data = messageTable.data
         curDanmu[1] = data.message .. "[醒目留言:" .. data.price .. "元]"
         curDanmu[2] = data.user_info.uname
         curDanmu[3] = ""
+        speechTimer = 600
     elseif commandType == "SEND_GIFT" then --送礼
         local data = messageTable.data
         local coinTypeTable = {["gold"] = {"金电池", 0.01} , ["silver"] = {"银瓜子", 1}}
@@ -144,6 +148,7 @@ local function getCurDanmu(output)
         curDanmu[1] = "送出了1个" .. data.giftName .. "[" .. realPrice .. coinTypeTable[data.coin_type][1] .. "]"
         curDanmu[2] = data.uname
         curDanmu[3] = ""
+        speechTimer = 600
     end
 end
 
@@ -208,7 +213,6 @@ local function CallbackOnMessage(message, isBinary)
         if message:sub(5,12) == "\x00\x10\x00\x02\x00\x00\x00\x05" then
             local output = zzlib.inflate(message:sub(17))
             getCurDanmu(output)
-            speechTimer = 600
         end
     else
         curDanmu[1] = "服务器文本消息：" .. message
