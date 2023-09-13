@@ -1,5 +1,6 @@
 -- import the zzlib library
 local zzlib = require("zzlib")
+local json = require("json")
 
 -- basic variables
 local mod = RegisterMod("szx_bili_danmuji", 1)
@@ -21,7 +22,7 @@ end
 loadFont()
 
 -- text variables
-local modVersion = "三只熊弹幕姬v1.0"
+local modVersion = "三只熊弹幕姬v1.1"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instuctionText1 = "在任何情况下"
 local instuctionText2 = "按 [LCtrl + z] 即可重置连接"
@@ -57,47 +58,46 @@ local function displayTitle()
 end
 
 local function getCurDanmu(output)
-    mod:SaveData(output)
-    if string.find(output, '"cmd":"DANMU_MSG"') then
-        local startIndex, endIndex = string.find(output, '\\"content\\":\\"')
-        if startIndex then
-            local contentStartIndex = endIndex + 1
-            local contentEndIndex = string.find(output, '\\"', contentStartIndex)
-            if contentEndIndex then
-                local content = string.sub(output, contentStartIndex, contentEndIndex - 1)
-                curDanmu[1] = content
-                local restOutput = output:sub(contentEndIndex + 1)
-                local secondContentStartIndex, secondContentEndIndex = string.find(restOutput, '"'..content..'",')
-                if secondContentEndIndex then
-                    local lastOutput = restOutput:sub(secondContentEndIndex + 1)
-                    local startIdx, endIdx = string.find(lastOutput, ',"')
-                    if startIdx then
-                        local nameStartIndex = endIdx + 1
-                        local nameEndIndex = string.find(lastOutput, '"', nameStartIndex)
-                        local name = string.sub(lastOutput, nameStartIndex, nameEndIndex - 1)
-                        curDanmu[2] = name
-                    else
-                        curDanmu[2] = "nil"
-                    end
-                else
-                    curDanmu[2] = "nil"
-                end
-            else
-                curDanmu[1] = "nil"
-                curDanmu[2] = "nil"
-            end
-            curDanmu[3] = ""
-        else
-            curDanmu[1] = ""
-            curDanmu[2] = ""
-            curDanmu[3] = '"content" not in message'
+    local message = output:sub(17)
+    local messageTable = json.decode(message)
+    local commandType = messageTable.cmd
+    if commandType:sub(1, 9) == "DANMU_MSG" then --弹幕
+        curDanmu[1] = messageTable.info[2]
+        curDanmu[2] = messageTable.info[3][2]
+        curDanmu[3] = ""
+    elseif commandType == "POPULARITY_RED_POCKET_NEW" then --留言红包
+        local data = messageTable.data
+        curDanmu[1] = "送出了1个红包[" .. data.price .. "金电池]"
+        curDanmu[2] = data.uname
+        curDanmu[3] = ""
+    elseif commandType == "GUARD_BUY" then --上舰
+        local data = messageTable.data
+        local guardNameTable = {"总督", "提督", "舰长"}
+        curDanmu[1] = "开通了" .. data.num .. "个月" .. guardNameTable[data.guard_level]
+        curDanmu[2] = messageTable.data.username
+        curDanmu[3] = ""
+    elseif commandType == "SUPER_CHAT_MESSAGE" then --醒目留言
+        local data = messageTable.data
+        curDanmu[1] = data.message .. "[醒目留言:" .. data.price .. "元]"
+        curDanmu[2] = data.user_info.uname
+        curDanmu[3] = ""
+    elseif commandType == "SEND_GIFT" then --送礼
+        local data = messageTable.data
+        local coinTypeTable = {["gold"] = {"金电池", 0.01} , ["silver"] = {"银瓜子", 1}}
+        local realPrice = data.price * coinTypeTable[data.coin_type][2]
+        local t1, t2 = math.modf(realPrice)
+        if t2 == 0 then
+            realPrice = t1
         end
+        curDanmu[1] = "送出了1个" .. data.giftName .. "[" .. realPrice .. coinTypeTable[data.coin_type][1] .. "]"
+        curDanmu[2] = data.uname
+        curDanmu[3] = ""
     end
 end
 
 local function getSequenceBytes(seq)
     local seqBytes = string.char((seq >> 24) & 0xFF, (seq >> 16) & 0xFF, (seq >> 8) & 0xFF, seq & 0xFF)
-    
+
     return seqBytes
 end
 
@@ -109,11 +109,11 @@ local function sendInitPacket()
         ws.Send(packet, true)
         curDanmu[1] = ""
         curDanmu[2] = ""
-        curDanmu[3] = "Execute sending init packet"
+        curDanmu[3] = {"连接成功", 2}
     else
         curDanmu[1] = ""
         curDanmu[2] = ""
-        curDanmu[3] = "WebSocketClient is not open"
+        curDanmu[3] = {"认证包发送失败", 1}
     end
 end
 
@@ -126,7 +126,7 @@ local function sendHeartBeatPacket()
     else
         curDanmu[1] = ""
         curDanmu[2] = ""
-        curDanmu[3] = "WebSocketClient is not open"
+        curDanmu[3] = {"心跳包发送失败", 1}
         speechTimer = 150
     end
 end
@@ -136,18 +136,18 @@ local function closeWebSocket()
         ws.Close(IsaacSocket.WebSocketClient.CloseStatus.NORMAL, "Normal Closure")
         curDanmu[1] = ""
         curDanmu[2] = ""
-        curDanmu[3] = "Execute normal closure"
+        curDanmu[3] = {"正在断开连接", 2}
     else
         curDanmu[1] = ""
         curDanmu[2] = ""
-        curDanmu[3] = "IsaacSocket is not connected"
+        curDanmu[3] = {"IsaacSocket未正常工作(断开连接)", 1}
     end
 end
 
 local function CallbackOnOpen()
     curDanmu[1] = ""
     curDanmu[2] = ""
-    curDanmu[3] = "Open"
+    curDanmu[3] = {"正在启动连接", 2}
     speechTimer = 150
 end
 
@@ -158,26 +158,31 @@ local function CallbackOnMessage(message, isBinary)
             getCurDanmu(output)
             speechTimer = 600
         end
-        print("Binary Message, length = " .. #message)
     else
-        curDanmu[1] = ""
-        curDanmu[2] = ""
-        curDanmu[3] = "Text Message: " .. message
+        curDanmu[1] = "服务器文本消息：" .. message
+        curDanmu[2] = "请把这条消息告诉作者谢谢"
+        curDanmu[3] = ""
         speechTimer = 600
     end
 end
 
 local function CallbackOnClose(closeStatus, message)
-    curDanmu[1] = ""
+    local closeTextTable = {}
+    if closeStatus == 1000 then
+        closeTextTable = {"断开连接成功", 2}
+    else
+        closeTextTable = {"自动断开连接", 1}
+    end
+    curDanmu[1] = message
     curDanmu[2] = ""
-    curDanmu[3] = "Close: [" .. closeStatus .. "]" .. message
+    curDanmu[3] = {closeTextTable[1] .. "[" .. closeStatus .. "]", closeTextTable[2]}
     speechTimer = 150
 end
 
 local function CallbackOnError(message)
     curDanmu[1] = ""
     curDanmu[2] = ""
-    curDanmu[3] = "Error: " .. message
+    curDanmu[3] = {"连接出现错误:" .. message, 1}
     speechTimer = 150
 end
 
@@ -195,6 +200,7 @@ local function onRender(_)
             speechTimer = 150
         end
         ws = nil
+        timer = 0
         sequence = 1
         roomLatencyTimer = 0
         inputBoxText = "请黏贴直播间号：[LCtrl + v]"
@@ -206,6 +212,7 @@ local function onRender(_)
             speechTimer = 150
         end
         ws = nil
+        timer = 0
         sequence = 1
         roomLatencyTimer = 0
         inputBoxText = "请黏贴直播间号：[LCtrl + v]"
@@ -218,7 +225,7 @@ local function onRender(_)
                 if #pasteText == 0 then
                     curDanmu[1] = ""
                     curDanmu[2] = ""
-                    curDanmu[3] = "Clipboard is empty"
+                    curDanmu[3] = {"剪贴板为空", 1}
                 else
                     local isLegal = true
                     for i = 1, #pasteText do
@@ -240,17 +247,17 @@ local function onRender(_)
                         initHeaderRoomIdValue = pasteText
                         curDanmu[1] = ""
                         curDanmu[2] = ""
-                        curDanmu[3] = "A new ws object was set"
+                        curDanmu[3] = {"正在初始化连接", 2}
                     else
                         curDanmu[1] = ""
                         curDanmu[2] = ""
-                        curDanmu[3] = "room id is illegal"
+                        curDanmu[3] = {"剪贴板非纯数字", 1}
                     end
                 end
             else
                 curDanmu[1] = ""
                 curDanmu[2] = ""
-                curDanmu[3] = "IsaacSocket is not connected"
+                curDanmu[3] = {"IsaacSocket未正常工作(连接直播间)", 1}
             end
             speechTimer = 150
         end 
@@ -269,12 +276,12 @@ local function onRender(_)
             else
                 curDanmu[1] = ""
                 curDanmu[2] = ""
-                curDanmu[3] = "ws object is nil" 
+                curDanmu[3] = {"websocket对象为空(请把这条消息告诉作者谢谢)", 1}
             end
         else
             curDanmu[1] = ""
             curDanmu[2] = ""
-            curDanmu[3] = "IsaacSocket is not connected"
+            curDanmu[3] = {"IsaacSocket未正常工作(发送认证包)", 1}
         end
         speechTimer = 150
     end
@@ -289,13 +296,13 @@ local function onRender(_)
             else
                 curDanmu[1] = ""
                 curDanmu[2] = ""
-                curDanmu[3] = "ws object is nil" 
+                curDanmu[3] = {"websocket对象为空(请把这条消息告诉作者谢谢)", 1}
                 speechTimer = 150
             end
         else
             curDanmu[1] = ""
             curDanmu[2] = ""
-            curDanmu[3] = "IsaacSocket is not connected"
+            curDanmu[3] = {"IsaacSocket未正常工作(发送心跳包)", 1}
             speechTimer = 150
         end
     end
@@ -310,10 +317,16 @@ local function onRender(_)
             font:DrawStringUTF8(curDanmu[1], pos.X - font:GetStringWidthUTF8(curDanmu[1]) / 2, pos.Y - 36 * player.SpriteScale.Y - 8 - font:GetLineHeight(), KColor(1, 1, 1, 1), 0, false)
         end
         if curDanmu[2] ~= "" then
-            font:DrawStringUTF8(curDanmu[2], pos.X - font:GetStringWidthUTF8(curDanmu[2]) / 2, pos.Y + 16 - font:GetLineHeight(), KColor(1, 1, 1, 1), 0, false)
+            font:DrawStringUTF8(curDanmu[2], pos.X - font:GetStringWidthUTF8(curDanmu[2]) / 2, pos.Y + 16 - font:GetLineHeight(), KColor(1, 0.75, 0, 1), 0, false)
         end
         if curDanmu[3] ~= "" then
-            font:DrawStringUTF8(curDanmu[3], pos.X - font:GetStringWidthUTF8(curDanmu[3]) / 2, pos.Y + 16 - font:GetLineHeight(), KColor(0.8, 0.1, 0.1, 1), 0, false)
+            if curDanmu[3][2] == 1 then
+                font:DrawStringUTF8(curDanmu[3][1], pos.X - font:GetStringWidthUTF8(curDanmu[3][1]) / 2, pos.Y + 16 - font:GetLineHeight(), KColor(0.8, 0.1, 0.1, 1), 0, false)
+            elseif curDanmu[3][2] == 2 then
+                font:DrawStringUTF8(curDanmu[3][1], pos.X - font:GetStringWidthUTF8(curDanmu[3][1]) / 2, pos.Y + 16 - font:GetLineHeight(), KColor(0.1, 0.8, 0.1, 1), 0, false)
+            elseif curDanmu[3][2] == 3 then
+                font:DrawStringUTF8(curDanmu[3][1], pos.X - font:GetStringWidthUTF8(curDanmu[3][1]) / 2, pos.Y + 16 - font:GetLineHeight(), KColor(1, 0.75, 0, 1), 0, false)
+            end
         end
     end
 end
