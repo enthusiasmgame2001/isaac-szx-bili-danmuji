@@ -27,7 +27,7 @@ end
 loadFont()
 
 -- text variables
-local modVersion = "三只熊弹幕姬v1.2"
+local modVersion = "三只熊弹幕姬v1.3"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instuctionText1 = "在任何情况下"
 local instuctionText2 = "按 [LCtrl + z] 即可重置连接"
@@ -55,6 +55,7 @@ local needAnimate = {}
 --danmu variables
 local curDanmu = {"", "", ""}
 local speechTimer = 0
+local roomId = ""
 
 local function cloneTable(originalTable)
 	local clone = {}
@@ -106,51 +107,72 @@ local function displayTitle()
     font:DrawStringUTF8(instuctionText4, 60, 243, KColor(1, 0.75, 0, 1), 0, false)
 end
 
-local function getCurDanmu(output)
-    local message = output:sub(17)
-    local messageTable = json.decode(message)
-    local commandType = messageTable.cmd
-    if commandType:sub(1, 9) == "DANMU_MSG" then --弹幕
-        curDanmu[1] = messageTable.info[2]
-        curDanmu[2] = messageTable.info[3][2]
-        curDanmu[3] = ""
-        speechTimer = 600
-        if szxDanmuji.danmuCommandOn then
-            table.insert(szxDanmuji.danmuTable, curDanmu[1])
+local function getCurDanmu(message)
+    local p = 1
+    while p + 15 <= #message do
+        local packetLength, headerLength, protoVersion, packetType, _, offset = string.unpack(">I4I2I2I4I4", message,p)
+        local text = string.sub(message, p + 16, p + packetLength - 1)
+        if protoVersion == 2 then
+            getCurDanmu(zzlib.inflate(text))
+        elseif packetType == 3 then
+            -- 人气值
+        elseif packetType == 5 then
+            local messageTable = json.decode(text)
+            local commandType = messageTable.cmd
+            local commandType = messageTable.cmd
+            if commandType:sub(1, 9) == "DANMU_MSG" then --弹幕
+                if messageTable.info[1][10] ~= 2 then --排除抽奖弹幕
+                    curDanmu[1] = messageTable.info[2]
+                    curDanmu[2] = messageTable.info[3][2]
+                    curDanmu[3] = ""
+                    speechTimer = 600
+                    if szxDanmuji.danmuCommandOn then
+                        table.insert(szxDanmuji.danmuTable, curDanmu[1])
+                    end
+                end
+            elseif commandType == "POPULARITY_RED_POCKET_NEW" then --留言红包
+                local data = messageTable.data
+                curDanmu[1] = "送出了1个红包[" .. data.price .. "金电池]"
+                curDanmu[2] = data.uname
+                curDanmu[3] = ""
+                speechTimer = 600
+            elseif commandType == "GUARD_BUY" then --上舰
+                local data = messageTable.data
+                local guardNameTable = {"总督", "提督", "舰长"}
+                curDanmu[1] = "开通了" .. data.num .. "个月" .. guardNameTable[data.guard_level]
+                curDanmu[2] = messageTable.data.username
+                curDanmu[3] = ""
+                speechTimer = 600
+            elseif commandType == "SUPER_CHAT_MESSAGE" then --醒目留言
+                local data = messageTable.data
+                curDanmu[1] = data.message .. "[醒目留言:" .. data.price .. "元]"
+                curDanmu[2] = data.user_info.uname
+                curDanmu[3] = ""
+                speechTimer = 600
+            elseif commandType == "SEND_GIFT" then --送礼
+                local data = messageTable.data
+                local coinTypeTable = {["gold"] = {"金电池", 0.01} , ["silver"] = {"银瓜子", 1}}
+                local realPrice = data.price * coinTypeTable[data.coin_type][2]
+                local t1, t2 = math.modf(realPrice)
+                if t2 == 0 then
+                    realPrice = t1
+                end
+                curDanmu[1] = "送出了1个" .. data.giftName .. "[" .. realPrice .. coinTypeTable[data.coin_type][1] .. "]"
+                curDanmu[2] = data.uname
+                curDanmu[3] = ""
+                speechTimer = 600
+            end
+        elseif packetType == 8 then
+            -- 认证成功
+        else
+            -- 未知操作
         end
-    elseif commandType == "POPULARITY_RED_POCKET_NEW" then --留言红包
-        local data = messageTable.data
-        curDanmu[1] = "送出了1个红包[" .. data.price .. "金电池]"
-        curDanmu[2] = data.uname
-        curDanmu[3] = ""
-        speechTimer = 600
-    elseif commandType == "GUARD_BUY" then --上舰
-        local data = messageTable.data
-        local guardNameTable = {"总督", "提督", "舰长"}
-        curDanmu[1] = "开通了" .. data.num .. "个月" .. guardNameTable[data.guard_level]
-        curDanmu[2] = messageTable.data.username
-        curDanmu[3] = ""
-        speechTimer = 600
-    elseif commandType == "SUPER_CHAT_MESSAGE" then --醒目留言
-        local data = messageTable.data
-        curDanmu[1] = data.message .. "[醒目留言:" .. data.price .. "元]"
-        curDanmu[2] = data.user_info.uname
-        curDanmu[3] = ""
-        speechTimer = 600
-    elseif commandType == "SEND_GIFT" then --送礼
-        local data = messageTable.data
-        local coinTypeTable = {["gold"] = {"金电池", 0.01} , ["silver"] = {"银瓜子", 1}}
-        local realPrice = data.price * coinTypeTable[data.coin_type][2]
-        local t1, t2 = math.modf(realPrice)
-        if t2 == 0 then
-            realPrice = t1
-        end
-        curDanmu[1] = "送出了1个" .. data.giftName .. "[" .. realPrice .. coinTypeTable[data.coin_type][1] .. "]"
-        curDanmu[2] = data.uname
-        curDanmu[3] = ""
-        speechTimer = 600
+        p = p + packetLength
     end
+
+
 end
+
 
 local function getSequenceBytes(seq)
     local seqBytes = string.char((seq >> 24) & 0xFF, (seq >> 16) & 0xFF, (seq >> 8) & 0xFF, seq & 0xFF)
@@ -162,16 +184,13 @@ local function sendInitPacket()
     local headerSequenceBytes = getSequenceBytes(sequence)
     local header = initHeader12:sub(1,3) .. string.char(40 + #initHeaderRoomIdValue) .. initHeader12:sub(5) .. headerSequenceBytes
     local packet = header .. initHeaderRoomIdKey .. initHeaderRoomIdValue ..initHeaderProtoVersion
-    if ws.GetState() == IsaacSocket.WebSocketClient.State.OPEN then
-        ws.Send(packet, true)
-        curDanmu[1] = ""
-        curDanmu[2] = ""
-        curDanmu[3] = {"连接成功", 2}
-    else
-        curDanmu[1] = ""
-        curDanmu[2] = ""
-        curDanmu[3] = {"认证包发送失败", 1}
-    end
+    ws.Send(packet, true)
+    curDanmu[1] = ""
+    curDanmu[2] = ""
+    curDanmu[3] = {"连接成功", 2}
+    local saveDataTable = {}
+    saveDataTable.roomId = roomId
+    mod:SaveData(json.encode(saveDataTable))
 end
 
 local function sendHeartBeatPacket()
@@ -202,18 +221,26 @@ local function closeWebSocket()
 end
 
 local function CallbackOnOpen()
-    curDanmu[1] = ""
-    curDanmu[2] = ""
-    curDanmu[3] = {"正在启动连接", 2}
+    if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
+        if ws ~= nil then
+            sendInitPacket()
+            sequence = sequence + 1
+        else
+            curDanmu[1] = ""
+            curDanmu[2] = ""
+            curDanmu[3] = {"websocket对象为空(请把这条消息告诉作者谢谢)", 1}
+        end
+    else
+        curDanmu[1] = ""
+        curDanmu[2] = ""
+        curDanmu[3] = {"IsaacSocket未正常工作(发送认证包)", 1}
+    end
     speechTimer = 150
 end
 
 local function CallbackOnMessage(message, isBinary)
     if isBinary then
-        if message:sub(5,12) == "\x00\x10\x00\x02\x00\x00\x00\x05" then
-            local output = zzlib.inflate(message:sub(17))
-            getCurDanmu(output)
-        end
+        getCurDanmu(message)
     else
         curDanmu[1] = "服务器文本消息：" .. message
         curDanmu[2] = "请把这条消息告诉作者谢谢"
@@ -318,6 +345,54 @@ local function executeDanmuCommand(str)
     end
 end
 
+local function executePaste(useClipboard)
+    if ws == nil then     
+        if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
+            if useClipboard then
+                roomId = IsaacSocket.Clipboard.GetClipboard()
+            end
+            local pasteText = roomId
+            if #pasteText == 0 then
+                curDanmu[1] = ""
+                curDanmu[2] = ""
+                curDanmu[3] = {"剪贴板为空", 1}
+            else
+                local isLegal = true
+                for i = 1, #pasteText do
+                    local char = pasteText:sub(i, i)
+                    local num = tonumber(char)
+                    if num == nil then
+                        isLegal = false
+                        break
+                    else
+                        if math.floor(num) ~= num or num < 0 or num > 9 then
+                            isLegal = false
+                            break
+                        end
+                    end
+                end
+                if isLegal then
+                    inputBoxText = "正在连接直播间：" .. pasteText
+                    ws = IsaacSocket.WebSocketClient.New(address, CallbackOnOpen, CallbackOnMessage, CallbackOnClose, CallbackOnError)
+                    initHeaderRoomIdValue = pasteText
+                    curDanmu[1] = ""
+                    curDanmu[2] = ""
+                    curDanmu[3] = {"正在初始化连接", 2}
+                else
+                    curDanmu[1] = ""
+                    curDanmu[2] = ""
+                    curDanmu[3] = {"剪贴板非纯数字", 1}
+                end
+            end
+        else
+            curDanmu[1] = ""
+            curDanmu[2] = ""
+            curDanmu[3] = {"IsaacSocket未正常工作(连接直播间)", 1}
+        end
+    end
+    speechTimer = 150
+end
+
 local function onGameStart(_, IsContinued)
     needAnimate = {false, false}
     szxDanmuji.danmuTable = {}
@@ -370,6 +445,7 @@ local function onRender(_)
         timer = 0
         sequence = 1
         roomLatencyTimer = 0
+        roomId = ""
         inputBoxText = "请黏贴直播间号：[LCtrl + v]"
         danmujiOn = not danmujiOn
     end
@@ -382,75 +458,30 @@ local function onRender(_)
         timer = 0
         sequence = 1
         roomLatencyTimer = 0
+        roomId = ""
         inputBoxText = "请黏贴直播间号：[LCtrl + v]"
+        local saveDataTable = {}
+        mod:SaveData(json.encode(saveDataTable))
     end
     if danmujiOn and (ws == nil or roomLatencyTimer < 300) then
         displayTitle()
+        local jsonTable = {}
+        if mod:HasData () then
+            jsonTable = json.decode(mod:LoadData())
+        end
+        if jsonTable.roomId ~= nil then
+            roomId = jsonTable.roomId
+            executePaste(false)
+        end
         if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_V, 0) then
-            if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
-                local pasteText = IsaacSocket.Clipboard.GetClipboard()
-                if #pasteText == 0 then
-                    curDanmu[1] = ""
-                    curDanmu[2] = ""
-                    curDanmu[3] = {"剪贴板为空", 1}
-                else
-                    local isLegal = true
-                    for i = 1, #pasteText do
-                        local char = pasteText:sub(i, i)
-                        local num = tonumber(char)
-                        if num == nil then
-                            isLegal = false
-                            break
-                        else
-                            if math.floor(num) ~= num or num < 0 or num > 9 then
-                                isLegal = false
-                                break
-                            end
-                        end
-                    end
-                    if isLegal then
-                        inputBoxText = "正在连接直播间：" .. pasteText
-                        ws = IsaacSocket.WebSocketClient.New(address, CallbackOnOpen, CallbackOnMessage, CallbackOnClose, CallbackOnError)
-                        initHeaderRoomIdValue = pasteText
-                        curDanmu[1] = ""
-                        curDanmu[2] = ""
-                        curDanmu[3] = {"正在初始化连接", 2}
-                    else
-                        curDanmu[1] = ""
-                        curDanmu[2] = ""
-                        curDanmu[3] = {"剪贴板非纯数字", 1}
-                    end
-                end
-            else
-                curDanmu[1] = ""
-                curDanmu[2] = ""
-                curDanmu[3] = {"IsaacSocket未正常工作(连接直播间)", 1}
-            end
-            speechTimer = 150
+            executePaste(true)
         end 
     end
     if ws ~= nil then
-        timer = timer + 1
         if roomLatencyTimer < 300 then
             roomLatencyTimer = roomLatencyTimer + 1
         end
-    end
-    if timer == 150 and sequence == 1 then
-        if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
-            if ws ~= nil then
-                sendInitPacket()
-                sequence = sequence + 1
-            else
-                curDanmu[1] = ""
-                curDanmu[2] = ""
-                curDanmu[3] = {"websocket对象为空(请把这条消息告诉作者谢谢)", 1}
-            end
-        else
-            curDanmu[1] = ""
-            curDanmu[2] = ""
-            curDanmu[3] = {"IsaacSocket未正常工作(发送认证包)", 1}
-        end
-        speechTimer = 150
+        timer = timer + 1
     end
     if timer >= 1800 then
         timer = 0
