@@ -27,7 +27,7 @@ end
 loadFont()
 
 -- text variables
-local modVersion = "三只熊弹幕姬v1.3"
+local modVersion = "三只熊弹幕姬v1.4"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instuctionText1 = "在任何情况下"
 local instuctionText2 = "按 [LCtrl + z] 即可重置连接"
@@ -37,9 +37,10 @@ local instuctionText4 = "按 [LAlt + x] 开关弹幕互动 (观众发送弹幕'�
 local address = "wss://broadcastlv.chat.bilibili.com:443/sub"
 
 local initHeader12 = "\x00\x00\x00\x2F\x00\x10\x00\x01\x00\x00\x00\x07"
-local initHeaderRoomIdKey = "\x7B\x22\x72\x6F\x6F\x6D\x69\x64\x22\x3A" -- {"roomid":
-local initHeaderRoomIdValue = "1174749" -- szx's bilibili roomid
-local initHeaderProtoVersion = "\x2C\x22\x70\x72\x6F\x74\x6F\x76\x65\x72\x22\x3A\x32\x7D" -- ,"protover":2}
+local initUid = "\x7B\x22\x75\x69\x64\x22\x3A\x20\x32\x30\x38\x32\x35\x39" -- {"uid":208259
+local initRoomIdKey = "\x2C\x22\x72\x6F\x6F\x6D\x69\x64\x22\x3A" -- ,"roomid":
+local initRoomIdValue = "1174749" -- szx's bilibili roomid
+local initProtoVersion = "\x2C\x22\x70\x72\x6F\x74\x6F\x76\x65\x72\x22\x3A\x32\x7D" -- ,"protover":2}
 
 local heartHeader12 = "\x00\x00\x00\x13\x00\x10\x00\x01\x00\x00\x00\x02"
 local heartText = "\x73\x7A\x78" -- szx
@@ -182,8 +183,8 @@ end
 
 local function sendInitPacket()
     local headerSequenceBytes = getSequenceBytes(sequence)
-    local header = initHeader12:sub(1,3) .. string.char(40 + #initHeaderRoomIdValue) .. initHeader12:sub(5) .. headerSequenceBytes
-    local packet = header .. initHeaderRoomIdKey .. initHeaderRoomIdValue ..initHeaderProtoVersion
+    local header = initHeader12:sub(1,3) .. string.char(54 + #initRoomIdValue) .. initHeader12:sub(5) .. headerSequenceBytes
+    local packet = header .. initUid .. initRoomIdKey .. initRoomIdValue ..initProtoVersion
     ws.Send(packet, true)
     curDanmu[1] = ""
     curDanmu[2] = ""
@@ -374,7 +375,7 @@ local function executePaste(useClipboard)
                 if isLegal then
                     inputBoxText = "正在连接直播间：" .. pasteText
                     ws = IsaacSocket.WebSocketClient.New(address, CallbackOnOpen, CallbackOnMessage, CallbackOnClose, CallbackOnError)
-                    initHeaderRoomIdValue = pasteText
+                    initRoomIdValue = pasteText
                     curDanmu[1] = ""
                     curDanmu[2] = ""
                     curDanmu[3] = {"正在初始化连接", 2}
