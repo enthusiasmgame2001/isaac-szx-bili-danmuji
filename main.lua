@@ -1,3 +1,4 @@
+--[[
 -- global variables
 szxDanmuji = {}
 szxDanmuji.danmuTable = {}
@@ -6,6 +7,7 @@ szxDanmuji.danmuCommandOn = false
 -- import the zzlib library
 local zzlib = require("zzlib")
 local json = require("json")
+]]--
 
 -- basic variables
 local mod = RegisterMod("szx_bili_danmuji", 1)
@@ -27,7 +29,17 @@ end
 loadFont()
 
 -- text variables
-local modVersion = "三只熊弹幕姬v1.4"
+local modVersion = "三只熊弹幕姬v1.5"
+--v1.5 start
+local hintText = "按 [LCtrl + x] 开关弹幕姬"
+local reminderText1 = "b站现在限制了用户获取弹幕的方式，"
+local reminderText2 = "需要开播界面的身份码才能连接自己的直播间，"
+local reminderText3 = "暂时本弹幕姬mod将无法使用, 敬请谅解！"
+local reminderText4 = "我最近几个月比较忙，之后可能会重新更新本mod，感谢大家的理解！"
+local isReminderOn = true
+--v1.5 end
+
+--[[
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instuctionText1 = "在任何情况下"
 local instuctionText2 = "按 [LCtrl + z] 即可重置连接"
@@ -532,4 +544,27 @@ end
 
 mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, onGameStart)
 mod:AddCallback(ModCallbacks.MC_POST_UPDATE, onUpdate)
+mod:AddCallback(ModCallbacks.MC_POST_RENDER, onRender)
+]]--
+
+local function onGameStart(_, IsContinued)
+    isReminderOn = true
+end
+
+local function onRender(_)
+    local isCtrlPressed = Input.IsButtonPressed(Keyboard.KEY_LEFT_CONTROL, 0)
+    if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_X, 0) then
+        isReminderOn = not isReminderOn
+    end
+    if isReminderOn then
+        font:DrawStringUTF8(modVersion, 320, 168, KColor(1, 1, 1, 1), 0, false)
+        font:DrawStringUTF8(hintText, 320, 193, KColor(1, 1, 1, 1), 0, false)
+        font:DrawStringUTF8(reminderText1, 60, 168, KColor(1, 0.75, 0, 1), 0, false)
+        font:DrawStringUTF8(reminderText2, 60, 193, KColor(1, 0.75, 0, 1), 0, false)
+        font:DrawStringUTF8(reminderText3, 60, 218, KColor(1, 0.75, 0, 1), 0, false)
+        font:DrawStringUTF8(reminderText4, 60, 243, KColor(1, 0.75, 0, 1), 0, false)
+    end
+end
+
+mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, onGameStart)
 mod:AddCallback(ModCallbacks.MC_POST_RENDER, onRender)
