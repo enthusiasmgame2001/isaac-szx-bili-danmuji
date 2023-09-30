@@ -8,7 +8,7 @@ local qrencode = require("qrencode.lua")
 local ok, tab_or_message = qrencode.qrcode("b站关注enthusiasmgame(三只熊)谢谢喵！")
 local qRCodeDimension = #tab_or_message
 if not ok then
-    print(tab_or_message[qRCodeDimension][qRCodeDimension])
+    print(tab_or_message)
 end
 
 -- import the zzlib library
@@ -48,23 +48,13 @@ loadFont()
 
 -- text variables
 local modVersion = "三只熊弹幕姬v1.6"
---[[
---v1.5 start
-local hintText = "按 [LCtrl + x] 开关弹幕姬"
-local reminderText1 = "b站现在限制了用户获取弹幕的方式，"
-local reminderText2 = "需要开播界面的身份码才能连接自己的直播间，"
-local reminderText3 = "暂时本弹幕姬mod将无法使用, 敬请谅解！"
-local reminderText4 = "我最近几个月比较忙，之后可能会重新更新本mod，感谢大家的理解！"
-local isReminderOn = true
---v1.5 end
-]]--
-
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instuctionText1 = "在任何情况下"
 local instuctionText2 = "按 [LCtrl + z] 即可重置连接"
 local instuctionText3 = "按 [LCtrl + x] 开关弹幕姬"
 local instuctionText4 = "按 [LAlt + x] 开关弹幕互动 (观众发送弹幕'生成c1'会生成1号道具')"
 
+local getTokenPartUrl = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id="
 local address = "wss://broadcastlv.chat.bilibili.com:443/sub"
 
 local initHeader12 = "\x00\x00\x00\x2F\x00\x10\x00\x01\x00\x00\x00\x07"
@@ -85,11 +75,15 @@ local sequence = 1
 local timer = 0
 local roomLatencyTimer = 0
 local needAnimate = {}
+local allTimerStop = false
 
 --danmu variables
 local curDanmu = {"", "", ""}
 local speechTimer = 0
 local roomId = ""
+
+--QR code variables
+local qRCodeStartPos = {200, 50}
 
 local function cloneTable(originalTable)
 	local clone = {}
@@ -139,6 +133,14 @@ local function displayTitle()
     font:DrawStringUTF8(instuctionText2, 60, 193, KColor(1, 0.75, 0, 1), 0, false)
     font:DrawStringUTF8(instuctionText3, 60, 218, KColor(1, 0.75, 0, 1), 0, false)
     font:DrawStringUTF8(instuctionText4, 60, 243, KColor(1, 0.75, 0, 1), 0, false)
+end
+
+function isWsNil()
+    print(ws == nil)
+end
+
+function printAll()
+    print(allTimerStop)
 end
 
 local function getCurDanmu(message)
@@ -207,7 +209,6 @@ local function getCurDanmu(message)
 
 end
 
-
 local function getSequenceBytes(seq)
     local seqBytes = string.char((seq >> 24) & 0xFF, (seq >> 16) & 0xFF, (seq >> 8) & 0xFF, seq & 0xFF)
 
@@ -218,12 +219,6 @@ local function sendInitPacket()
     local headerSequenceBytes = getSequenceBytes(sequence)
     local header = initHeader12:sub(1,3) .. string.char(54 + #initRoomIdValue + #initToken) .. initHeader12:sub(5) .. headerSequenceBytes
     local packet = header .. initUid .. initRoomIdKey .. initRoomIdValue .. initProtoVersion .. initToken
-    print("initUid =", initUid)
-    print("initRoomIdKey =", initRoomIdKey)
-    print("initRoomIdValue =", initRoomIdValue)
-    print("initProtoVersion =", initProtoVersion)
-    print("initToken =", initToken)
-    print("packet =", packet)
     ws.Send(packet, true)
     curDanmu[1] = ""
     curDanmu[2] = ""
@@ -268,7 +263,7 @@ local function CallbackOnOpen()
         else
             curDanmu[1] = ""
             curDanmu[2] = ""
-            curDanmu[3] = {"websocket对象为空(请把这条消息告诉作者谢谢)", 1}
+            curDanmu[3] = {"websocket对象为空(请把这条消息告诉作者谢谢)", 3}
         end
     else
         curDanmu[1] = ""
@@ -385,108 +380,98 @@ local function executeDanmuCommand(str)
     end
 end
 
-local function executePaste(token)
-    print("line363", ws == nil)
-    if ws == nil then     
-        if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
-            --[[
-            if useClipboard then
-                roomId = IsaacSocket.Clipboard.GetClipboard()
-            end
-            ]]--
-            --[[
-            local pasteText = roomId
-            if #pasteText == 0 then
-                curDanmu[1] = ""
-                curDanmu[2] = ""
-                curDanmu[3] = {"剪贴板为空", 1}
-            else
-                local isLegal = true
-                for i = 1, #pasteText do
-                    local char = pasteText:sub(i, i)
-                    local num = tonumber(char)
-                    if num == nil then
-                        isLegal = false
-                        break
-                    else
-                        if math.floor(num) ~= num or num < 0 or num > 9 then
-                            isLegal = false
-                            break
-                        end
-                    end
-                end
-                if isLegal then
-                    inputBoxText = "正在连接直播间：" .. pasteText
-                    ws = IsaacSocket.WebSocketClient.New(address, CallbackOnOpen, CallbackOnMessage, CallbackOnClose, CallbackOnError)
-                    initRoomIdValue = pasteText
-                    curDanmu[1] = ""
-                    curDanmu[2] = ""
-                    curDanmu[3] = {"正在初始化连接", 2}
-                else
-                    curDanmu[1] = ""
-                    curDanmu[2] = ""
-                    curDanmu[3] = {"剪贴板非纯数字", 1}
-                end
-            end
-        else
-            curDanmu[1] = ""
-            curDanmu[2] = ""
-            curDanmu[3] = {"IsaacSocket未正常工作(连接直播间)", 1}
-        end
-    end
-    ]]--
-            inputBoxText = "正在连接直播间：" .. initRoomIdValue
-            initToken = initTokenKey .. '"' .. token .. '"' .. "\x7D"
-            ws = IsaacSocket.WebSocketClient.New(address, CallbackOnOpen, CallbackOnMessage, CallbackOnClose, CallbackOnError)
-            --initRoomIdValue = pasteText
-            print("ws established")
-            curDanmu[1] = ""
-            curDanmu[2] = ""
-            curDanmu[3] = {"正在初始化连接", 2}
-        else
-            curDanmu[1] = ""
-            curDanmu[2] = ""
-            curDanmu[3] = {"IsaacSocket未正常工作(连接直播间)", 1}
-        end
-    end
-    speechTimer = 150
+local function updateAllTimerStop(mode)
+    allTimerStop = mode
 end
 
-local function getTokenAndCreateWebSocketObject()
-    local url = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=3092145"
-    local headers = {
-        ["Cookie"] = "LIVE_BUVID=AUTO5616960701584697; buvid4=59FDECD7-121C-29C9-CB7A-01ACC492AC1959054-023093018-AvVeNZ9eYbnk1865fxIaNg%3D%3D; fingerprint=af29c218b5840cbf708ccf87c6b5d995; buvid_fp_plain=undefined; buvid3=FF370740-D72C-BC6D-0727-0FDDBDB5E21970399infoc; b_nut=1696070170; b_lsid=E6110212D_18AE5A8FAA1; _uuid=D85133B1-88610-DD91-7DCE-510107713635A371307infoc; DedeUserID=28193775; DedeUserID__ckMd5=f79f6f05306787b1; SESSDATA=86547e04%2C1711622318%2C9233d%2A92CjBw6iX9WJHsL7XyngWNFR4pST6yylrnWW9nA5obX19Ecyyp6As8vknK_mX7S-JfZ1YSVmJ6NzdnQnVZblNLUTRKNGxaV0tmT2hHai1IN3FqanktOXV0TnlvcUhHXzhIWWVqa0J1WkhUUTJiRmg4YkxVdWRiTTZ2cEtfTWdFaXJYcWNXVTBGTWlnIIEC; bili_jct=900734dce074bf54c791b7aa8641e2a3; header_theme_version=CLOSE; home_feed_column=4; browser_resolution=1280-603; CURRENT_FNVAL=4048; rpdid=|(Jkl~uRlYJY0J'uYmY|~|J~R; sid=7jlrrw2c; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2OTYzMzAxMTIsImlhdCI6MTY5NjA3MDg1MiwicGx0IjotMX0.RT9pBwllbJccy-d0FsqfiyrVRYAxZGqXvrAZBHwQFKA; bili_ticket_expires=1696330052; buvid_fp=af29c218b5840cbf708ccf87c6b5d995; bp_video_offset_28193775=847111402115039268; PVID=4"
-    }
-    if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
-        IsaacSocket.HttpClient.GetAsync(url, headers).Then(function(task)
-            if task.IsCompletedSuccessfully() then
-                local response = task.GetResult()
-                local body = json.decode(response.body)
-                if body.code == 0 then
-                    print("token =",body.data.token)
-                    executePaste(body.data.token)
+local function getTokenAndCreateWebSocketObject(useClipboard)
+    if ws == nil then     
+        if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
+            if useClipboard then
+                roomId = IsaacSocket.Clipboard.GetClipboard()
+                if #roomId == 0 then
+                    curDanmu[1] = ""
+                    curDanmu[2] = ""
+                    curDanmu[3] = {"剪贴板为空", 1}
+                    speechTimer = 150
+                    return
+                else
+                    local isLegal = true
+                    for i = 1, #roomId do
+                        local char = roomId:sub(i, i)
+                        local num = tonumber(char)
+                        if num == nil then
+                            isLegal = false
+                            break
+                        else
+                            if math.floor(num) ~= num or num < 0 or num > 9 then
+                                isLegal = false
+                                break
+                            end
+                        end
+                    end
+                    if isLegal then
+                        initRoomIdValue = roomId
+                        curDanmu[1] = ""
+                        curDanmu[2] = ""
+                        curDanmu[3] = {"正在初始化连接", 2}
+                    else
+                        curDanmu[1] = ""
+                        curDanmu[2] = ""
+                        curDanmu[3] = {"剪贴板非纯数字", 1}
+                        speechTimer = 150
+                        return
+                    end
+                end
+            else
+                initRoomIdValue = roomId
+                curDanmu[1] = ""
+                curDanmu[2] = ""
+                curDanmu[3] = {"正在初始化连接", 2}
+            end
+            inputBoxText = "正在连接直播间：" .. initRoomIdValue
+            local url = getTokenPartUrl .. roomId
+            local headers = {
+                ["Cookie"] = "LIVE_BUVID=AUTO5616960701584697; buvid4=59FDECD7-121C-29C9-CB7A-01ACC492AC1959054-023093018-AvVeNZ9eYbnk1865fxIaNg%3D%3D; fingerprint=af29c218b5840cbf708ccf87c6b5d995; buvid_fp_plain=undefined; buvid3=FF370740-D72C-BC6D-0727-0FDDBDB5E21970399infoc; b_nut=1696070170; b_lsid=E6110212D_18AE5A8FAA1; _uuid=D85133B1-88610-DD91-7DCE-510107713635A371307infoc; DedeUserID=28193775; DedeUserID__ckMd5=f79f6f05306787b1; SESSDATA=86547e04%2C1711622318%2C9233d%2A92CjBw6iX9WJHsL7XyngWNFR4pST6yylrnWW9nA5obX19Ecyyp6As8vknK_mX7S-JfZ1YSVmJ6NzdnQnVZblNLUTRKNGxaV0tmT2hHai1IN3FqanktOXV0TnlvcUhHXzhIWWVqa0J1WkhUUTJiRmg4YkxVdWRiTTZ2cEtfTWdFaXJYcWNXVTBGTWlnIIEC; bili_jct=900734dce074bf54c791b7aa8641e2a3; header_theme_version=CLOSE; home_feed_column=4; browser_resolution=1280-603; CURRENT_FNVAL=4048; rpdid=|(Jkl~uRlYJY0J'uYmY|~|J~R; sid=7jlrrw2c; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2OTYzMzAxMTIsImlhdCI6MTY5NjA3MDg1MiwicGx0IjotMX0.RT9pBwllbJccy-d0FsqfiyrVRYAxZGqXvrAZBHwQFKA; bili_ticket_expires=1696330052; buvid_fp=af29c218b5840cbf708ccf87c6b5d995; bp_video_offset_28193775=847111402115039268; PVID=4"
+            }
+            allTimerStop = true
+            IsaacSocket.HttpClient.GetAsync(url, headers).Then(function(task)
+                if task.IsCompletedSuccessfully() then
+                    local response = task.GetResult()
+                    local body = json.decode(response.body)
+                    if body.code == 0 then
+                        initToken = initTokenKey .. '"' .. body.data.token .. '"' .. "\x7D"
+                        ws = IsaacSocket.WebSocketClient.New(address, CallbackOnOpen, CallbackOnMessage, CallbackOnClose, CallbackOnError)
+                    else
+                        curDanmu[1] = ""
+                        curDanmu[2] = ""
+                        curDanmu[3] = {"token获得失败,code="..body.code, 1}
+                    end
                 else
                     curDanmu[1] = ""
                     curDanmu[2] = ""
-                    curDanmu[3] = {"token获得失败,code="..body.code, 1}
+                    curDanmu[3] = {"token获得失败,错误信息："..task.GetResult(), 1}
                 end
-            else
-                curDanmu[1] = ""
-                curDanmu[2] = ""
-                curDanmu[3] = {"token获得失败,错误信息："..task.GetResult(), 1}
-            end
-        end)
+                updateAllTimerStop(false)
+            end)
+        else
+            curDanmu[1] = ""
+            curDanmu[2] = ""
+            curDanmu[3] = {"IsaacSocket未正常工作(连接直播间)", 1}
+        end
+        speechTimer = 150
     end
 end
 
 local function onGameStart(_, IsContinued)
+    allTimerStop = false
     needAnimate = {false, false}
     szxDanmuji.danmuTable = {}
     updateItemTables()
 end
 
 local function onUpdate()
-    if speechTimer > 0 then
+    if not allTimerStop and speechTimer > 0 then
         speechTimer = speechTimer - 1
     end
     if #szxDanmuji.danmuTable > 0 then
@@ -549,23 +534,21 @@ local function onRender(_)
         local saveDataTable = {}
         mod:SaveData(json.encode(saveDataTable))
     end
-    if danmujiOn and (ws == nil or roomLatencyTimer < 300) then
+    if danmujiOn and (ws == nil or roomLatencyTimer < 300) and not allTimerStop then
         displayTitle()
-        --[[
         local jsonTable = {}
-        if mod:HasData () then
+        if mod:HasData() then
             jsonTable = json.decode(mod:LoadData())
         end
-        if jsonTable.roomId ~= nil then
+        if jsonTable.roomId ~= nil and jsonTable.roomId ~= "" then
             roomId = jsonTable.roomId
-            executePaste(false)
+            getTokenAndCreateWebSocketObject(false)
         end
-        ]]--
         if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_V, 0) then
-            getTokenAndCreateWebSocketObject()
+            getTokenAndCreateWebSocketObject(true)
         end 
     end
-    if ws ~= nil then
+    if ws ~= nil and not allTimerStop then
         if roomLatencyTimer < 300 then
             roomLatencyTimer = roomLatencyTimer + 1
         end
@@ -615,8 +598,6 @@ local function onRender(_)
             end
         end
     end
-
-    local startPos = {200, 50}
     for idx, sprite in ipairs(spriteQRCodeTable) do
         sprite:Play("Keys")
         if qRCodeSequence[idx] < 0 then
@@ -624,43 +605,12 @@ local function onRender(_)
         else
             sprite:SetLayerFrame(0, 1)
         end
-        local posX = startPos[1] + ((idx - 1) % qRCodeDimension) * 2
-        local posY = startPos[2] + ((idx - 1) // qRCodeDimension) * 2
+        local posX = qRCodeStartPos[1] + ((idx - 1) % qRCodeDimension) * 2
+        local posY = qRCodeStartPos[2] + ((idx - 1) // qRCodeDimension) * 2
         sprite:Render(Vector(posX, posY), Vector.Zero, Vector.Zero)
     end 
-    --[[
-    spriteQRCode   
-    spriteQRCode:SetLayerFrame(0, a)
-    --print(spriteQRCode.Scale.X)
-    spriteQRCode.Scale = Vector(5, 5)
-    spriteQRCode:Render(Vector(250,120), Vector(0, 0), Vector(0, 0))
-    ]]--
 end
 
 mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, onGameStart)
 mod:AddCallback(ModCallbacks.MC_POST_UPDATE, onUpdate)
 mod:AddCallback(ModCallbacks.MC_POST_RENDER, onRender)
-
---[[
-local function onGameStart(_, IsContinued)
-    isReminderOn = true
-end
-
-local function onRender(_)
-    local isCtrlPressed = Input.IsButtonPressed(Keyboard.KEY_LEFT_CONTROL, 0)
-    if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_X, 0) then
-        isReminderOn = not isReminderOn
-    end
-    if isReminderOn then
-        font:DrawStringUTF8(modVersion, 320, 168, KColor(1, 1, 1, 1), 0, false)
-        font:DrawStringUTF8(hintText, 320, 193, KColor(1, 1, 1, 1), 0, false)
-        font:DrawStringUTF8(reminderText1, 60, 168, KColor(1, 0.75, 0, 1), 0, false)
-        font:DrawStringUTF8(reminderText2, 60, 193, KColor(1, 0.75, 0, 1), 0, false)
-        font:DrawStringUTF8(reminderText3, 60, 218, KColor(1, 0.75, 0, 1), 0, false)
-        font:DrawStringUTF8(reminderText4, 60, 243, KColor(1, 0.75, 0, 1), 0, false)
-    end
-end
-
-mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, onGameStart)
-mod:AddCallback(ModCallbacks.MC_POST_RENDER, onRender)
-]]--
