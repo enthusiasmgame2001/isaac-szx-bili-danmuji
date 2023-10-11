@@ -2,15 +2,7 @@
 szxDanmuji = {}
 szxDanmuji.danmuTable = {}
 szxDanmuji.danmuCommandOn = false
-
--- getqrcode
-local qrencode = require("qrencode.lua")
-local ok, tab_or_message = qrencode.qrcode("b站关注enthusiasmgame(三只熊)谢谢喵！")
-local qRCodeDimension = #tab_or_message
-if not ok then
-    print(tab_or_message)
-end
-
+local ttt = 0
 -- import the zzlib library
 local zzlib = require("zzlib")
 local json = require("json")
@@ -19,18 +11,6 @@ local json = require("json")
 local mod = RegisterMod("szx_bili_danmuji", 1)
 local game = Game()
 local font = Font()
-local spriteQRCodeTable = {}
-for i = 1, qRCodeDimension*qRCodeDimension do
-    spriteQRCodeTable[i] = Sprite()
-    spriteQRCodeTable[i]:Load("gfx/qrcode.anm2", true)
-    spriteQRCodeTable[i].Scale = Vector(2, 2)
-end
-local qRCodeSequence = {}
-for i = 1, qRCodeDimension do
-    for j = 1, qRCodeDimension do
-        table.insert(qRCodeSequence, tab_or_message[i][j])
-    end
-end
 
 --load font
 local function loadFont()
@@ -55,7 +35,9 @@ local instuctionText3 = "按 [LCtrl + x] 开关弹幕姬"
 local instuctionText4 = "按 [LAlt + x] 开关弹幕互动 (观众发送弹幕'生成c1'会生成1号道具')"
 
 local getTokenPartUrl = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id="
-local address = "wss://broadcastlv.chat.bilibili.com:443/sub"
+local getQRCodeUrl = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
+local getQRCodeScanResponsePartUrl = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key="
+local danmuWsAddress = "wss://broadcastlv.chat.bilibili.com:443/sub"
 
 local initHeader12 = "\x00\x00\x00\x2F\x00\x10\x00\x01\x00\x00\x00\x07"
 local initUid = "\x7B\x22\x75\x69\x64\x22\x3A\x32\x38\x31\x39\x33\x37\x37\x35" -- {"uid":28193775 [[szx's uid]]
@@ -83,7 +65,26 @@ local speechTimer = 0
 local roomId = ""
 
 --QR code variables
+local spriteQRCodeTable = {}
+local qRCodeSequence = {}
+local qRCodeDimension = nil
 local qRCodeStartPos = {200, 50}
+local cookieStateTable = {
+    INIT = 0, --初始状态，未启动getCookie过程
+    START = 1, --开始getCookie过程
+    WAITQRCODEREADY = 2, --等待生成二维码请求的响应
+    QRCODEREADY = 3, --二维码已生成
+    WAITSCANRESPONSE = 4, --等待获得二维码扫描情况的响应
+    SUCCESS = 5, --扫码登录成功
+    EXPIRED = 6, --二维码已失效
+    TOBECONFIRMED = 7, --用户已扫码，等待用户确认
+    TOBESCANNED = 8, --用户未代码，等待用户扫码
+    END = 9 --完成getCookie过程
+}
+local cookieState = cookieStateTable.INIT
+local qrCodeKey = ""
+local userCookieUrl = ""
+local qrRequestTimer = 0
 
 local function cloneTable(originalTable)
 	local clone = {}
@@ -133,6 +134,45 @@ local function displayTitle()
     font:DrawStringUTF8(instuctionText2, 60, 193, KColor(1, 0.75, 0, 1), 0, false)
     font:DrawStringUTF8(instuctionText3, 60, 218, KColor(1, 0.75, 0, 1), 0, false)
     font:DrawStringUTF8(instuctionText4, 60, 243, KColor(1, 0.75, 0, 1), 0, false)
+end
+
+local function initQRCodeSequence(qrCodeUrl)
+    local qrencode = require("qrencode.lua")
+    local ok, tab_or_message = qrencode.qrcode(qrCodeUrl)
+    qRCodeDimension = #tab_or_message
+    if not ok then
+        curDanmu[1] = ""
+        curDanmu[2] = ""
+        curDanmu[3] = {"二维码图像生成失败：" .. tab_or_message, 1}
+        speechTimer = 150
+    end
+
+    spriteQRCodeTable = {}
+    for i = 1, qRCodeDimension*qRCodeDimension do
+        spriteQRCodeTable[i] = Sprite()
+        spriteQRCodeTable[i]:Load("gfx/qrcode.anm2", true)
+        spriteQRCodeTable[i].Scale = Vector(2, 2)
+    end
+    qRCodeSequence = {}
+    for i = 1, qRCodeDimension do
+        for j = 1, qRCodeDimension do
+            table.insert(qRCodeSequence, tab_or_message[i][j])
+        end
+    end
+end
+
+local function diplayQRCode()
+    for idx, sprite in ipairs(spriteQRCodeTable) do
+        sprite:Play("Keys")
+        if qRCodeSequence[idx] >= 0 then
+            sprite:SetLayerFrame(0, 0)
+        else
+            sprite:SetLayerFrame(0, 1)
+        end
+        local posX = qRCodeStartPos[1] + ((idx - 1) % qRCodeDimension) * 2
+        local posY = qRCodeStartPos[2] + ((idx - 1) // qRCodeDimension) * 2
+        sprite:Render(Vector(posX, posY), Vector.Zero, Vector.Zero)
+    end 
 end
 
 function isWsNil()
@@ -205,8 +245,6 @@ local function getCurDanmu(message)
         end
         p = p + packetLength
     end
-
-
 end
 
 local function getSequenceBytes(seq)
@@ -384,12 +422,82 @@ local function updateAllTimerStop(mode)
     allTimerStop = mode
 end
 
+local function updateCookieState()
+    if cookieState == cookieStateTable.INIT then
+        cookieState = cookieStateTable.START
+    elseif cookieState == cookieStateTable.START or cookieState == cookieStateTable.EXPIRED then
+        cookieState = cookieStateTable.WAITQRCODEREADY
+        local url = getQRCodeUrl
+        local headers = {}
+        print("yibuqingqiu")
+        IsaacSocket.HttpClient.GetAsync(url, headers).Then(function(task)
+            if task.IsCompletedSuccessfully() then
+                local response = task.GetResult()
+                local body = json.decode(response.body)
+                if body.code == 0 then
+                    initQRCodeSequence(body.data.url)
+                    qrCodeKey = body.data.qrcode_key
+                    cookieState = cookieStateTable.QRCODEREADY
+                else
+                    curDanmu[1] = ""
+                    curDanmu[2] = ""
+                    curDanmu[3] = {"二维码获得失败,code="..body.code, 1}
+                    cookieState = cookieStateTable.START
+                end
+            else
+                curDanmu[1] = ""
+                curDanmu[2] = ""
+                curDanmu[3] = {"二维码获得失败,错误信息："..task.GetResult(), 1}
+                cookieState = cookieStateTable.START
+            end
+            speechTimer = 150
+        end)
+    elseif cookieState == cookieStateTable.QRCODEREADY or cookieState == cookieStateTable.TOBESCANNED or cookieState == cookieStateTable.TOBECONFIRMED then
+        cookieState = cookieStateTable.WAITSCANRESPONSE
+        local url = getQRCodeScanResponsePartUrl .. qrCodeKey
+        local headers = {}
+        print("yibuqingqiu")
+        IsaacSocket.HttpClient.GetAsync(url, headers).Then(function(task)
+            if task.IsCompletedSuccessfully() then
+                local response = task.GetResult()
+                local body = json.decode(response.body)
+                if body.code == 0 then
+                    local responseCode = body.data.code
+                    if responseCode == 0 then
+                        qrCodeKey = ""
+                        userCookieUrl = body.data.url
+                        cookieState = cookieStateTable.SUCCESS
+                    elseif responseCode == 86038 then
+                        qrCodeKey = ""
+                        cookieState = cookieStateTable.EXPIRED
+                    elseif responseCode == 86090 then
+                        cookieState = cookieStateTable.TOBECONFIRMED
+                    elseif responseCode == 86101 then
+                        cookieState = cookieStateTable.TOBESCANNED
+                    end
+                else
+                    curDanmu[1] = ""
+                    curDanmu[2] = ""
+                    curDanmu[3] = {"检测扫描结果失败,code="..body.code, 1}
+                end
+            else
+                curDanmu[1] = ""
+                curDanmu[2] = ""
+                curDanmu[3] = {"检测扫描结果失败,错误信息："..task.GetResult(), 1}
+            end
+            speechTimer = 150
+        end)
+    elseif cookieState == cookieStateTable.SUCCESS then
+        print(userCookieUrl)
+    end
+end
+
 local function getTokenAndCreateWebSocketObject(useClipboard)
     if ws == nil then     
         if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
             if useClipboard then
-                roomId = IsaacSocket.Clipboard.GetClipboard()
-                if #roomId == 0 then
+                local pasteText = IsaacSocket.Clipboard.GetClipboard()
+                if #pasteText == 0 then
                     curDanmu[1] = ""
                     curDanmu[2] = ""
                     curDanmu[3] = {"剪贴板为空", 1}
@@ -397,8 +505,8 @@ local function getTokenAndCreateWebSocketObject(useClipboard)
                     return
                 else
                     local isLegal = true
-                    for i = 1, #roomId do
-                        local char = roomId:sub(i, i)
+                    for i = 1, #pasteText do
+                        local char = pasteText:sub(i, i)
                         local num = tonumber(char)
                         if num == nil then
                             isLegal = false
@@ -411,7 +519,8 @@ local function getTokenAndCreateWebSocketObject(useClipboard)
                         end
                     end
                     if isLegal then
-                        initRoomIdValue = roomId
+                        initRoomIdValue = pasteText
+                        roomId = pasteText
                         curDanmu[1] = ""
                         curDanmu[2] = ""
                         curDanmu[3] = {"正在初始化连接", 2}
@@ -430,30 +539,63 @@ local function getTokenAndCreateWebSocketObject(useClipboard)
                 curDanmu[3] = {"正在初始化连接", 2}
             end
             inputBoxText = "正在连接直播间：" .. initRoomIdValue
-            local url = getTokenPartUrl .. roomId
-            local headers = {
-                ["Cookie"] = "LIVE_BUVID=AUTO5616960701584697; buvid4=59FDECD7-121C-29C9-CB7A-01ACC492AC1959054-023093018-AvVeNZ9eYbnk1865fxIaNg%3D%3D; fingerprint=af29c218b5840cbf708ccf87c6b5d995; buvid_fp_plain=undefined; buvid3=FF370740-D72C-BC6D-0727-0FDDBDB5E21970399infoc; b_nut=1696070170; b_lsid=E6110212D_18AE5A8FAA1; _uuid=D85133B1-88610-DD91-7DCE-510107713635A371307infoc; DedeUserID=28193775; DedeUserID__ckMd5=f79f6f05306787b1; SESSDATA=86547e04%2C1711622318%2C9233d%2A92CjBw6iX9WJHsL7XyngWNFR4pST6yylrnWW9nA5obX19Ecyyp6As8vknK_mX7S-JfZ1YSVmJ6NzdnQnVZblNLUTRKNGxaV0tmT2hHai1IN3FqanktOXV0TnlvcUhHXzhIWWVqa0J1WkhUUTJiRmg4YkxVdWRiTTZ2cEtfTWdFaXJYcWNXVTBGTWlnIIEC; bili_jct=900734dce074bf54c791b7aa8641e2a3; header_theme_version=CLOSE; home_feed_column=4; browser_resolution=1280-603; CURRENT_FNVAL=4048; rpdid=|(Jkl~uRlYJY0J'uYmY|~|J~R; sid=7jlrrw2c; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2OTYzMzAxMTIsImlhdCI6MTY5NjA3MDg1MiwicGx0IjotMX0.RT9pBwllbJccy-d0FsqfiyrVRYAxZGqXvrAZBHwQFKA; bili_ticket_expires=1696330052; buvid_fp=af29c218b5840cbf708ccf87c6b5d995; bp_video_offset_28193775=847111402115039268; PVID=4"
-            }
-            allTimerStop = true
-            IsaacSocket.HttpClient.GetAsync(url, headers).Then(function(task)
-                if task.IsCompletedSuccessfully() then
-                    local response = task.GetResult()
-                    local body = json.decode(response.body)
-                    if body.code == 0 then
-                        initToken = initTokenKey .. '"' .. body.data.token .. '"' .. "\x7D"
-                        ws = IsaacSocket.WebSocketClient.New(address, CallbackOnOpen, CallbackOnMessage, CallbackOnClose, CallbackOnError)
+            if qrRequestTimer == 15 then
+                updateCookieState()
+            end
+            if cookieState == cookieStateTable.END then
+                local url = getTokenPartUrl .. roomId
+                local headers = {
+                    ["Cookie"] = "\
+                    LIVE_BUVID=AUTO5616960701584697;\
+                    buvid4=59FDECD7-121C-29C9-CB7A-01ACC492AC1959054-023093018-AvVeNZ9eYbnk1865fxIaNg%3D%3D; \
+                    fingerprint=af29c218b5840cbf708ccf87c6b5d995; \
+                    buvid_fp_plain=undefined; \
+                    buvid3=FF370740-D72C-BC6D-0727-0FDDBDB5E21970399infoc; \
+                    b_nut=1696070170; \
+                    b_lsid=E6110212D_18AE5A8FAA1; \
+                    _uuid=D85133B1-88610-DD91-7DCE-510107713635A371307infoc; \
+                    \
+                    DedeUserID=28193775; \
+                    DedeUserID__ckMd5=f79f6f05306787b1; \
+                    SESSDATA=86547e04%2C1711622318%2C9233d%2A92CjBw6iX9WJHsL7XyngWNFR4pST6yylrnWW9nA5obX19Ecyyp6As8vknK_mX7S-JfZ1YSVmJ6NzdnQnVZblNLUTRKNGxaV0tmT2hHai1IN3FqanktOXV0TnlvcUhHXzhIWWVqa0J1WkhUUTJiRmg4YkxVdWRiTTZ2cEtfTWdFaXJYcWNXVTBGTWlnIIEC; \
+                    bili_jct=900734dce074bf54c791b7aa8641e2a3; \
+                    \
+                    header_theme_version=CLOSE; \
+                    home_feed_column=4; \
+                    browser_resolution=1280-603; \
+                    CURRENT_FNVAL=4048; \
+                    rpdid=|(Jkl~uRlYJY0J'uYmY|~|J~R; \
+                    sid=7jlrrw2c; \
+                    bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2OTYzMzAxMTIsImlhdCI6MTY5NjA3MDg1MiwicGx0IjotMX0.RT9pBwllbJccy-d0FsqfiyrVRYAxZGqXvrAZBHwQFKA; \
+                    bili_ticket_expires=1696330052; \
+                    buvid_fp=af29c218b5840cbf708ccf87c6b5d995; \
+                    bp_video_offset_28193775=847111402115039268; \
+                    PVID=4\
+                    "
+                }
+                allTimerStop = true
+                print("yibuqingqiu")
+                IsaacSocket.HttpClient.GetAsync(url, headers).Then(function(task)
+                    if task.IsCompletedSuccessfully() then
+                        local response = task.GetResult()
+                        local body = json.decode(response.body)
+                        if body.code == 0 then
+                            initToken = initTokenKey .. '"' .. body.data.token .. '"' .. "\x7D"
+                            ws = IsaacSocket.WebSocketClient.New(danmuWsAddress, CallbackOnOpen, CallbackOnMessage, CallbackOnClose, CallbackOnError)
+                        else
+                            curDanmu[1] = ""
+                            curDanmu[2] = ""
+                            curDanmu[3] = {"token获得失败,code="..body.code, 1}
+                        end
                     else
                         curDanmu[1] = ""
                         curDanmu[2] = ""
-                        curDanmu[3] = {"token获得失败,code="..body.code, 1}
+                        curDanmu[3] = {"token获得失败,错误信息："..task.GetResult(), 1}
                     end
-                else
-                    curDanmu[1] = ""
-                    curDanmu[2] = ""
-                    curDanmu[3] = {"token获得失败,错误信息："..task.GetResult(), 1}
-                end
-                updateAllTimerStop(false)
-            end)
+                    speechTimer = 150
+                    updateAllTimerStop(false)
+                end)
+            end
         else
             curDanmu[1] = ""
             curDanmu[2] = ""
@@ -542,6 +684,8 @@ local function onRender(_)
         end
         if jsonTable.roomId ~= nil and jsonTable.roomId ~= "" then
             roomId = jsonTable.roomId
+        end
+        if roomId ~= "" then
             getTokenAndCreateWebSocketObject(false)
         end
         if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_V, 0) then
@@ -556,6 +700,10 @@ local function onRender(_)
     end
     if timer >= 1800 then
         timer = 0
+    end
+    qrRequestTimer = qrRequestTimer + 1
+    if qrRequestTimer >= 120 then
+        qrRequestTimer = 0
     end
     if timer == 900 then
         if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
@@ -598,17 +746,22 @@ local function onRender(_)
             end
         end
     end
-    for idx, sprite in ipairs(spriteQRCodeTable) do
-        sprite:Play("Keys")
-        if qRCodeSequence[idx] < 0 then
-            sprite:SetLayerFrame(0, 0)
-        else
-            sprite:SetLayerFrame(0, 1)
-        end
-        local posX = qRCodeStartPos[1] + ((idx - 1) % qRCodeDimension) * 2
-        local posY = qRCodeStartPos[2] + ((idx - 1) // qRCodeDimension) * 2
-        sprite:Render(Vector(posX, posY), Vector.Zero, Vector.Zero)
+    if cookieState == cookieStateTable.QRCODEREADY or cookieState == cookieStateTable.TOBESCANNED or cookieState == cookieStateTable.TOBECONFIRMED or cookieState == cookieStateTable.WAITSCANRESPONSE then
+        diplayQRCode()
     end 
+    --test
+    ttt = ttt + 1
+    if ttt == 120 then
+        ttt = 1
+    end
+    if ttt == 30 then
+        for k, v in pairs(cookieStateTable) do
+            if v == cookieState then
+                print("cookieState=", k)
+                break
+            end
+        end
+    end
 end
 
 mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, onGameStart)
