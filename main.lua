@@ -41,9 +41,10 @@ local getUserNameUrl = "https://api.live.bilibili.com/xlive/web-ucenter/user/get
 local danmuWsAddress = "wss://broadcastlv.chat.bilibili.com:443/sub"
 
 local initHeader12 = "\x00\x00\x00\x2F\x00\x10\x00\x01\x00\x00\x00\x07"
-local initUid = "\x7B\x22\x75\x69\x64\x22\x3A\x32\x38\x31\x39\x33\x37\x37\x35" -- {"uid":28193775 [[szx's uid]]
+local initUidKey = "\x7B\x22\x75\x69\x64\x22\x3A" -- {"uid":
+local initUidValue = "" -- uid
 local initRoomIdKey = "\x2C\x22\x72\x6F\x6F\x6D\x69\x64\x22\x3A" -- ,"roomid":
-local initRoomIdValue = "3092145" -- lanbing's bilibili roomid
+local initRoomIdValue = "" -- roomid
 local initProtoVersion = "\x2C\x22\x70\x72\x6F\x74\x6F\x76\x65\x72\x22\x3A\x32" -- ,"protover":2
 local initTokenKey = "\x2C\x22\x6B\x65\x79\x22\x3A" -- ,"key":
 local initToken = initTokenKey
@@ -295,8 +296,8 @@ end
 
 local function sendInitPacket()
     local headerSequenceBytes = getSequenceBytes(sequence)
-    local header = initHeader12:sub(1,3) .. string.char(54 + #initRoomIdValue + #initToken) .. initHeader12:sub(5) .. headerSequenceBytes
-    local packet = header .. initUid .. initRoomIdKey .. initRoomIdValue .. initProtoVersion .. initToken
+    local header = initHeader12:sub(1,3) .. string.char(46 + #initUidValue + #initRoomIdValue + #initToken) .. initHeader12:sub(5) .. headerSequenceBytes
+    local packet = header .. initUidKey .. initUidValue .. initRoomIdKey .. initRoomIdValue .. initProtoVersion .. initToken
     ws.Send(packet, true)
     curDanmu[1] = ""
     curDanmu[2] = ""
@@ -584,6 +585,7 @@ local function updateCookieState()
                 local body = json.decode(response.body)
                 if body.code == 0 then
                     userName = body.data.uname
+                    initUidValue = tostring(body.data.uid)
                     cookieState = cookieStateTable.USER_INFO_RECEIVED
                 else
                     curDanmu[1] = ""
