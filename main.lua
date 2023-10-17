@@ -2,7 +2,7 @@
 szxDanmuji = {}
 szxDanmuji.danmuTable = {}
 szxDanmuji.danmuCommandOn = false
-local ttt = 0
+
 -- import the zzlib library
 local zzlib = require("zzlib")
 local json = require("json")
@@ -29,14 +29,15 @@ loadFont()
 -- text variables
 local modVersion = "三只熊弹幕姬v1.6"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
-local instuctionText1 = "在任何情况下"
-local instuctionText2 = "按 [LCtrl + z] 即可重置连接"
+local instuctionText1 = "按 [LCtrl + u] 重置登录账户"
+local instuctionText2 = "按 [LCtrl + z] 重置直播间号"
 local instuctionText3 = "按 [LCtrl + x] 开关弹幕姬"
-local instuctionText4 = "按 [LAlt + x] 开关弹幕互动 (观众发送弹幕'生成c1'会生成1号道具')"
+local instuctionText4 = "按 [LAlt + x] 开关弹幕互动 (观众发送弹幕'生成c2'会生成2号道具)"
 
 local getTokenPartUrl = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id="
 local getQRCodeUrl = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 local getQRCodeScanResponsePartUrl = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key="
+local getUserNameUrl = "https://api.live.bilibili.com/xlive/web-ucenter/user/get_user_info"
 local danmuWsAddress = "wss://broadcastlv.chat.bilibili.com:443/sub"
 
 local initHeader12 = "\x00\x00\x00\x2F\x00\x10\x00\x01\x00\x00\x00\x07"
@@ -72,19 +73,65 @@ local qRCodeStartPos = {200, 50}
 local cookieStateTable = {
     INIT = 0, --初始状态，未启动getCookie过程
     START = 1, --开始getCookie过程
-    WAITQRCODEREADY = 2, --等待生成二维码请求的响应
-    QRCODEREADY = 3, --二维码已生成
-    WAITSCANRESPONSE = 4, --等待获得二维码扫描情况的响应
+    WAIT_QRCODE_READY = 2, --等待生成二维码请求的响应
+    QRCODE_READY = 3, --二维码已生成
+    WAIT_SCAN_RESPONSE = 4, --等待获得二维码扫描情况的响应
     SUCCESS = 5, --扫码登录成功
     EXPIRED = 6, --二维码已失效
-    TOBECONFIRMED = 7, --用户已扫码，等待用户确认
-    TOBESCANNED = 8, --用户未代码，等待用户扫码
-    END = 9 --完成getCookie过程
+    TO_BE_CONFIRMED = 7, --用户已扫码，等待用户确认
+    TO_BE_SCANNED = 8, --用户未代码，等待用户扫码
+    COOKIE_IS_READY = 9, --Cookie已得到
+    WAIT_USER_INFO_RESPONSE = 10, --等待获得用户信息的响应
+    USER_INFO_RECEIVED = 11, --用户信息已得到
+    END = 12 --ws对象创建完成
 }
 local cookieState = cookieStateTable.INIT
 local qrCodeKey = ""
 local userCookieUrl = ""
 local qrRequestTimer = 0
+local userName = ""
+local cookieStr = ""
+
+local function simpleEncrypt(input)
+    local output = input:gsub('[a-zA-Z0-9]', function(char)
+        local encryptedChar = string.byte(char) + 1
+        if char == 'z' then
+            return 'a'
+        elseif char == 'Z' then
+            return 'A'
+        elseif char == '9' then
+            return '0'
+        else
+            return string.char(encryptedChar)
+        end
+    end)
+    return output
+end
+
+local function simpleDecrypt(input)
+    local output = input:gsub('[a-zA-Z0-9]', function(char)
+        local decryptedChar = string.byte(char) - 1
+        if char == 'a' then
+            return 'z'
+        elseif char == 'A' then
+            return 'Z'
+        elseif char == '0' then
+            return '9'
+        else
+            return string.char(decryptedChar)
+        end
+    end)
+    return output
+end
+
+local jsonTable = {}
+if mod:HasData() then
+    jsonTable = json.decode(mod:LoadData())
+end
+if jsonTable.cookie ~= nil and jsonTable.cookie ~= "" then
+    cookieStr = simpleDecrypt(jsonTable.cookie) 
+    cookieState = cookieStateTable.COOKIE_IS_READY
+end
 
 local function cloneTable(originalTable)
 	local clone = {}
@@ -128,12 +175,13 @@ local function executeAnimation(n)
 end
 
 local function displayTitle()
-    font:DrawStringUTF8(modVersion, 275, 193, KColor(1, 1, 1, 1), 0, false)
-    font:DrawStringUTF8(inputBoxText, 250, 218, KColor(1, 1, 1, 1), 0, false)
-    font:DrawStringUTF8(instuctionText1, 60, 168, KColor(1, 0.75, 0, 1), 0, false)
-    font:DrawStringUTF8(instuctionText2, 60, 193, KColor(1, 0.75, 0, 1), 0, false)
-    font:DrawStringUTF8(instuctionText3, 60, 218, KColor(1, 0.75, 0, 1), 0, false)
+    font:DrawStringUTF8(modVersion, 275, 183, KColor(1, 1, 1, 1), 0, false)
+    font:DrawStringUTF8(inputBoxText, 275, 223, KColor(1, 1, 1, 1), 0, false)
+    font:DrawStringUTF8(instuctionText1, 60, 183, KColor(1, 0.75, 0, 1), 0, false)
+    font:DrawStringUTF8(instuctionText2, 60, 203, KColor(1, 0.75, 0, 1), 0, false)
+    font:DrawStringUTF8(instuctionText3, 60, 223, KColor(1, 0.75, 0, 1), 0, false)
     font:DrawStringUTF8(instuctionText4, 60, 243, KColor(1, 0.75, 0, 1), 0, false)
+    font:DrawStringUTF8("当前登录用户：" .. userName, 275, 203, KColor(1, 1, 1, 1), 0, false)
 end
 
 local function initQRCodeSequence(qrCodeUrl)
@@ -172,15 +220,7 @@ local function diplayQRCode()
         local posX = qRCodeStartPos[1] + ((idx - 1) % qRCodeDimension) * 2
         local posY = qRCodeStartPos[2] + ((idx - 1) // qRCodeDimension) * 2
         sprite:Render(Vector(posX, posY), Vector.Zero, Vector.Zero)
-    end 
-end
-
-function isWsNil()
-    print(ws == nil)
-end
-
-function printAll()
-    print(allTimerStop)
+    end
 end
 
 local function getCurDanmu(message)
@@ -260,9 +300,10 @@ local function sendInitPacket()
     ws.Send(packet, true)
     curDanmu[1] = ""
     curDanmu[2] = ""
-    curDanmu[3] = {"连接成功", 2}
+    curDanmu[3] = {"已成功连接 " .. roomId .. " 直播间", 2}
     local saveDataTable = {}
     saveDataTable.roomId = roomId
+    saveDataTable.cookie = simpleEncrypt(cookieStr)
     mod:SaveData(json.encode(saveDataTable))
 end
 
@@ -418,18 +459,18 @@ local function executeDanmuCommand(str)
     end
 end
 
-local function updateAllTimerStop(mode)
-    allTimerStop = mode
-end
-
 local function updateCookieState()
     if cookieState == cookieStateTable.INIT then
-        cookieState = cookieStateTable.START
+        if cookieStr == "" then
+            cookieState = cookieStateTable.START
+        else
+            cookieState = cookieStateTable.COOKIE_IS_READY
+        end
     elseif cookieState == cookieStateTable.START or cookieState == cookieStateTable.EXPIRED then
-        cookieState = cookieStateTable.WAITQRCODEREADY
+        allTimerStop = true
+        cookieState = cookieStateTable.WAIT_QRCODE_READY
         local url = getQRCodeUrl
         local headers = {}
-        print("yibuqingqiu")
         IsaacSocket.HttpClient.GetAsync(url, headers).Then(function(task)
             if task.IsCompletedSuccessfully() then
                 local response = task.GetResult()
@@ -437,7 +478,10 @@ local function updateCookieState()
                 if body.code == 0 then
                     initQRCodeSequence(body.data.url)
                     qrCodeKey = body.data.qrcode_key
-                    cookieState = cookieStateTable.QRCODEREADY
+                    cookieState = cookieStateTable.QRCODE_READY
+                    curDanmu[1] = ""
+                    curDanmu[2] = ""
+                    curDanmu[3] = {"请扫码(手动重置二维码请按[LCtrl+u])", 2}
                 else
                     curDanmu[1] = ""
                     curDanmu[2] = ""
@@ -452,11 +496,10 @@ local function updateCookieState()
             end
             speechTimer = 150
         end)
-    elseif cookieState == cookieStateTable.QRCODEREADY or cookieState == cookieStateTable.TOBESCANNED or cookieState == cookieStateTable.TOBECONFIRMED then
-        cookieState = cookieStateTable.WAITSCANRESPONSE
+    elseif cookieState == cookieStateTable.QRCODE_READY or cookieState == cookieStateTable.TO_BE_SCANNED or cookieState == cookieStateTable.TO_BE_CONFIRMED then
+        cookieState = cookieStateTable.WAIT_SCAN_RESPONSE
         local url = getQRCodeScanResponsePartUrl .. qrCodeKey
         local headers = {}
-        print("yibuqingqiu")
         IsaacSocket.HttpClient.GetAsync(url, headers).Then(function(task)
             if task.IsCompletedSuccessfully() then
                 local response = task.GetResult()
@@ -467,13 +510,16 @@ local function updateCookieState()
                         qrCodeKey = ""
                         userCookieUrl = body.data.url
                         cookieState = cookieStateTable.SUCCESS
+                        curDanmu[1] = ""
+                        curDanmu[2] = ""
+                        curDanmu[3] = {"登录成功", 2}
                     elseif responseCode == 86038 then
                         qrCodeKey = ""
                         cookieState = cookieStateTable.EXPIRED
                     elseif responseCode == 86090 then
-                        cookieState = cookieStateTable.TOBECONFIRMED
+                        cookieState = cookieStateTable.TO_BE_CONFIRMED
                     elseif responseCode == 86101 then
-                        cookieState = cookieStateTable.TOBESCANNED
+                        cookieState = cookieStateTable.TO_BE_SCANNED
                     end
                 else
                     curDanmu[1] = ""
@@ -488,7 +534,69 @@ local function updateCookieState()
             speechTimer = 150
         end)
     elseif cookieState == cookieStateTable.SUCCESS then
-        print(userCookieUrl)
+        local paramsPart = string.sub(userCookieUrl, string.find(userCookieUrl, "?") + 1)
+
+        local keyValuePairs = {}
+        for pair in paramsPart:gmatch("([^&]+)") do
+            local key, value = pair:match("([^=]+)=([^=]+)")
+            keyValuePairs[key] = value
+        end
+
+        local targetParameters = {"DedeUserID", "DedeUserID__ckMd5", "SESSDATA", "bili_jct"}
+        local extractedParams = {}
+        local cookieMissing = false
+        for _, paramName in ipairs(targetParameters) do
+            local value = keyValuePairs[paramName]
+            if value then
+                extractedParams[paramName] = value
+            else
+                cookieMissing = true
+                curDanmu[1] = ""
+                curDanmu[2] = ""
+                curDanmu[3] = {"cookie字段缺失：".. paramName, 1}
+            end
+        end
+        if cookieMissing then
+            cookieState = cookieStateTable.START
+            speechTimer = 150
+        else
+            for paramName, value in pairs(extractedParams) do
+                if cookieStr ~= "" then
+                    cookieStr = cookieStr .. "; "
+                end
+                cookieStr = cookieStr .. paramName .. "=" .. value
+            end
+            cookieState = cookieStateTable.COOKIE_IS_READY
+            local saveDataTable = {}
+            saveDataTable.roomId = roomId
+            saveDataTable.cookie = simpleEncrypt(cookieStr)
+            mod:SaveData(json.encode(saveDataTable))
+        end
+    elseif cookieState == cookieStateTable.COOKIE_IS_READY then
+        cookieState = cookieStateTable.WAIT_USER_INFO_RESPONSE
+        local url = getUserNameUrl
+        local headers = {
+            ["Cookie"] = cookieStr
+        }
+        IsaacSocket.HttpClient.GetAsync(url, headers).Then(function(task)
+            if task.IsCompletedSuccessfully() then
+                local response = task.GetResult()
+                local body = json.decode(response.body)
+                if body.code == 0 then
+                    userName = body.data.uname
+                    cookieState = cookieStateTable.USER_INFO_RECEIVED
+                else
+                    curDanmu[1] = ""
+                    curDanmu[2] = ""
+                    curDanmu[3] = {"获得用户信息失败,code="..body.code, 1}
+                end
+            else
+                curDanmu[1] = ""
+                curDanmu[2] = ""
+                curDanmu[3] = {"获得用户信息失败,错误信息："..task.GetResult(), 1}
+            end
+            speechTimer = 150
+        end)
     end
 end
 
@@ -524,6 +632,7 @@ local function getTokenAndCreateWebSocketObject(useClipboard)
                         curDanmu[1] = ""
                         curDanmu[2] = ""
                         curDanmu[3] = {"正在初始化连接", 2}
+                        speechTimer = 150
                     else
                         curDanmu[1] = ""
                         curDanmu[2] = ""
@@ -533,48 +642,23 @@ local function getTokenAndCreateWebSocketObject(useClipboard)
                     end
                 end
             else
-                initRoomIdValue = roomId
-                curDanmu[1] = ""
-                curDanmu[2] = ""
-                curDanmu[3] = {"正在初始化连接", 2}
+                if initRoomIdValue ~= roomId then
+                    initRoomIdValue = roomId
+                    curDanmu[1] = ""
+                    curDanmu[2] = ""
+                    curDanmu[3] = {"正在初始化连接", 2}
+                    speechTimer = 150
+                end
             end
             inputBoxText = "正在连接直播间：" .. initRoomIdValue
             if qrRequestTimer == 15 then
                 updateCookieState()
             end
-            if cookieState == cookieStateTable.END then
+            if cookieState == cookieStateTable.USER_INFO_RECEIVED then
                 local url = getTokenPartUrl .. roomId
                 local headers = {
-                    ["Cookie"] = "\
-                    LIVE_BUVID=AUTO5616960701584697;\
-                    buvid4=59FDECD7-121C-29C9-CB7A-01ACC492AC1959054-023093018-AvVeNZ9eYbnk1865fxIaNg%3D%3D; \
-                    fingerprint=af29c218b5840cbf708ccf87c6b5d995; \
-                    buvid_fp_plain=undefined; \
-                    buvid3=FF370740-D72C-BC6D-0727-0FDDBDB5E21970399infoc; \
-                    b_nut=1696070170; \
-                    b_lsid=E6110212D_18AE5A8FAA1; \
-                    _uuid=D85133B1-88610-DD91-7DCE-510107713635A371307infoc; \
-                    \
-                    DedeUserID=28193775; \
-                    DedeUserID__ckMd5=f79f6f05306787b1; \
-                    SESSDATA=86547e04%2C1711622318%2C9233d%2A92CjBw6iX9WJHsL7XyngWNFR4pST6yylrnWW9nA5obX19Ecyyp6As8vknK_mX7S-JfZ1YSVmJ6NzdnQnVZblNLUTRKNGxaV0tmT2hHai1IN3FqanktOXV0TnlvcUhHXzhIWWVqa0J1WkhUUTJiRmg4YkxVdWRiTTZ2cEtfTWdFaXJYcWNXVTBGTWlnIIEC; \
-                    bili_jct=900734dce074bf54c791b7aa8641e2a3; \
-                    \
-                    header_theme_version=CLOSE; \
-                    home_feed_column=4; \
-                    browser_resolution=1280-603; \
-                    CURRENT_FNVAL=4048; \
-                    rpdid=|(Jkl~uRlYJY0J'uYmY|~|J~R; \
-                    sid=7jlrrw2c; \
-                    bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2OTYzMzAxMTIsImlhdCI6MTY5NjA3MDg1MiwicGx0IjotMX0.RT9pBwllbJccy-d0FsqfiyrVRYAxZGqXvrAZBHwQFKA; \
-                    bili_ticket_expires=1696330052; \
-                    buvid_fp=af29c218b5840cbf708ccf87c6b5d995; \
-                    bp_video_offset_28193775=847111402115039268; \
-                    PVID=4\
-                    "
+                    ["Cookie"] = cookieStr
                 }
-                allTimerStop = true
-                print("yibuqingqiu")
                 IsaacSocket.HttpClient.GetAsync(url, headers).Then(function(task)
                     if task.IsCompletedSuccessfully() then
                         local response = task.GetResult()
@@ -593,15 +677,16 @@ local function getTokenAndCreateWebSocketObject(useClipboard)
                         curDanmu[3] = {"token获得失败,错误信息："..task.GetResult(), 1}
                     end
                     speechTimer = 150
-                    updateAllTimerStop(false)
+                    allTimerStop = false
                 end)
+                cookieState = cookieStateTable.END
             end
         else
             curDanmu[1] = ""
             curDanmu[2] = ""
             curDanmu[3] = {"IsaacSocket未正常工作(连接直播间)", 1}
+            speechTimer = 150
         end
-        speechTimer = 150
     end
 end
 
@@ -649,48 +734,89 @@ local function onRender(_)
         end
         speechTimer = 150
     end
+    if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_U, 0) then
+        if danmujiOn then
+            cookieState = cookieStateTable.START
+            cookieStr = ""
+            curDanmu[1] = ""
+            curDanmu[2] = ""
+            curDanmu[3] = {"二维码登录已重置", 2}
+            speechTimer = 150
+            local saveDataTable = {}
+            if roomId ~= "" then
+                saveDataTable.roomId = roomId
+            end
+            mod:SaveData(json.encode(saveDataTable))
+        end
+        if ws ~= nil then
+            closeWebSocket()
+        end
+        ws = nil
+        timer = 0
+        sequence = 1
+        roomLatencyTimer = 0
+        allTimerStop = false
+        userName = ""
+    end
     if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_X, 0) then
         if ws ~= nil then
             closeWebSocket()
             speechTimer = 150
+        else
+            speechTimer = 0
         end
         ws = nil
         timer = 0
         sequence = 1
         roomLatencyTimer = 0
         roomId = ""
+        allTimerStop = false
         inputBoxText = "请黏贴直播间号：[LCtrl + v]"
         danmujiOn = not danmujiOn
+        if danmujiOn then
+            cookieState = cookieStateTable.INIT
+        else
+            cookieState = cookieStateTable.END
+        end
     end
     if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_Z, 0) then
         if ws ~= nil then
             closeWebSocket()
             speechTimer = 150
+        else
+            speechTimer = 0
         end
         ws = nil
         timer = 0
         sequence = 1
         roomLatencyTimer = 0
         roomId = ""
+        allTimerStop = false
         inputBoxText = "请黏贴直播间号：[LCtrl + v]"
         local saveDataTable = {}
+        saveDataTable.cookie = simpleEncrypt(cookieStr)
         mod:SaveData(json.encode(saveDataTable))
+        danmujiOn = true
+        cookieState = cookieStateTable.INIT
     end
-    if danmujiOn and (ws == nil or roomLatencyTimer < 300) and not allTimerStop then
+    if danmujiOn and (ws == nil or roomLatencyTimer < 300) then
         displayTitle()
-        local jsonTable = {}
-        if mod:HasData() then
-            jsonTable = json.decode(mod:LoadData())
-        end
-        if jsonTable.roomId ~= nil and jsonTable.roomId ~= "" then
-            roomId = jsonTable.roomId
+        if roomId == "" then
+            local jsonTable = {}
+            if mod:HasData() then
+                jsonTable = json.decode(mod:LoadData())
+            end
+            if jsonTable.roomId ~= nil and jsonTable.roomId ~= "" then
+                roomId = jsonTable.roomId
+            end
         end
         if roomId ~= "" then
             getTokenAndCreateWebSocketObject(false)
+        else
+            if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_V, 0) then
+                getTokenAndCreateWebSocketObject(true)
+            end 
         end
-        if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_V, 0) then
-            getTokenAndCreateWebSocketObject(true)
-        end 
     end
     if ws ~= nil and not allTimerStop then
         if roomLatencyTimer < 300 then
@@ -746,21 +872,8 @@ local function onRender(_)
             end
         end
     end
-    if cookieState == cookieStateTable.QRCODEREADY or cookieState == cookieStateTable.TOBESCANNED or cookieState == cookieStateTable.TOBECONFIRMED or cookieState == cookieStateTable.WAITSCANRESPONSE then
+    if cookieState == cookieStateTable.QRCODE_READY or cookieState == cookieStateTable.TO_BE_SCANNED or cookieState == cookieStateTable.TO_BE_CONFIRMED or cookieState == cookieStateTable.WAIT_SCAN_RESPONSE then
         diplayQRCode()
-    end 
-    --test
-    ttt = ttt + 1
-    if ttt == 120 then
-        ttt = 1
-    end
-    if ttt == 30 then
-        for k, v in pairs(cookieStateTable) do
-            if v == cookieState then
-                print("cookieState=", k)
-                break
-            end
-        end
     end
 end
 
