@@ -27,12 +27,15 @@ end
 loadFont()
 
 -- text variables
-local modVersion = "三只熊弹幕姬v1.6"
+local modVersion = "三只熊弹幕姬v1.7"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
-local instuctionText1 = "按 [LCtrl + u] 重置登录账户"
-local instuctionText2 = "按 [LCtrl + z] 重置直播间号"
-local instuctionText3 = "按 [LCtrl + x] 开关弹幕姬"
-local instuctionText4 = "按 [LAlt + x] 开关弹幕互动 (观众发送弹幕'生成c2'会生成2号道具)"
+local instructionTextTable = {
+    "按 [LCtrl + u] 重置登录账户",
+    "按 [LCtrl + z] 重置直播间号",
+    "按 [LCtrl + x] 开关弹幕姬",
+    "按 [LAlt + x] 开关弹幕互动",
+    "按 [B] 打开设置菜单"
+}
 
 local getTokenPartUrl = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id="
 local getQRCodeUrl = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
@@ -93,6 +96,25 @@ local qrRequestTimer = 0
 local userName = ""
 local cookieStr = ""
 
+--config variables
+local letPlayerControl = true
+local canModifyConfig = false
+local selectOption = 1
+local selectedOption = 0
+local optionQuestion = {
+    "请选择需要修改的属性：(按[B]保存并退出设置)",
+    "按[T]发送测试弹幕"
+}
+local optionList = {
+    "弹幕文字大小",
+    "弹幕持续时间"
+}
+local configPosTable = {135, 55}
+local configParameterTable = { -- {当前值, 最小值, 最大值, 步长, 单位名称, 显示系数}
+    {10, 5, 50, 1, " 倍", 10},
+    {20, 1, 120, 1, " 秒", 1}
+}
+
 local function simpleEncrypt(input)
     local output = input:gsub('[a-zA-Z0-9]', function(char)
         local encryptedChar = string.byte(char) + 1
@@ -133,6 +155,12 @@ if jsonTable.cookie ~= nil and jsonTable.cookie ~= "" then
     cookieStr = simpleDecrypt(jsonTable.cookie) 
     cookieState = cookieStateTable.COOKIE_IS_READY
 end
+if jsonTable.textSize ~= nil then
+    configParameterTable[1][1] = jsonTable.textSize
+end
+if jsonTable.textDuration ~= nil then
+    configParameterTable[2][1] = jsonTable.textDuration
+end
 
 local function cloneTable(originalTable)
 	local clone = {}
@@ -153,6 +181,63 @@ local codeCommandMapTable = {
     ["T"] = {"spawn 5.350.", true},
     ["k"] = {"spawn 5.300.", false}
 }
+
+local function displayConfigMenu()
+    if not game:IsPaused() then
+        local frameChoose = false
+        if selectedOption == 0 then
+            if Input.IsActionTriggered(ButtonAction.ACTION_UP, 0) or Input.IsActionTriggered(ButtonAction.ACTION_SHOOTUP, 0) then
+                selectOption = selectOption - 1
+                if selectOption < 1 then
+                    selectOption = #optionList
+                end
+            elseif Input.IsActionTriggered(ButtonAction.ACTION_DOWN, 0) or Input.IsActionTriggered(ButtonAction.ACTION_SHOOTDOWN, 0) then
+                selectOption = selectOption + 1
+                if selectOption > #optionList then
+                    selectOption = 1
+                end
+            elseif Input.IsActionTriggered(ButtonAction.ACTION_ITEM, 0) or Input.IsButtonTriggered(Keyboard.KEY_ENTER, 0) or Input.IsActionTriggered(ButtonAction.ACTION_RIGHT, 0) or Input.IsActionTriggered(ButtonAction.ACTION_SHOOTRIGHT, 0) then
+                selectedOption = selectOption
+                frameChoose = true
+            end
+        end
+        for i = 1, #optionList do
+            if selectedOption == i then
+                font:DrawStringUTF8(configParameterTable[i][1] / configParameterTable[i][6] .. configParameterTable[i][5], configPosTable[1] + font:GetStringWidthUTF8(optionList[i] .. "    >>    "), configPosTable[2] + 18 * i, KColor(0.15, 0.7, 0.7, 1), 0, false)
+                if Input.IsActionTriggered(ButtonAction.ACTION_UP, 0) or Input.IsActionTriggered(ButtonAction.ACTION_SHOOTUP, 0) then
+                    if configParameterTable[i][1] < configParameterTable[i][3] then
+                        configParameterTable[i][1] = configParameterTable[i][1] + configParameterTable[i][4]
+                        if configParameterTable[i][1] > configParameterTable[i][3] then
+                            configParameterTable[i][1] = configParameterTable[i][3]
+                        end
+                    end
+                elseif Input.IsActionTriggered(ButtonAction.ACTION_DOWN, 0) or Input.IsActionTriggered(ButtonAction.ACTION_SHOOTDOWN, 0) then
+                    if configParameterTable[i][1] > configParameterTable[i][2] then
+                        configParameterTable[i][1] = configParameterTable[i][1] - configParameterTable[i][4]
+                        if configParameterTable[i][1] < configParameterTable[i][2] then
+                            configParameterTable[i][1] = configParameterTable[i][2]
+                        end
+                    end
+                elseif Input.IsActionTriggered(ButtonAction.ACTION_ITEM, 0) or Input.IsButtonTriggered(Keyboard.KEY_ENTER, 0) or Input.IsActionTriggered(ButtonAction.ACTION_LEFT, 0) or Input.IsActionTriggered(ButtonAction.ACTION_SHOOTLEFT, 0) then
+                    if not frameChoose then
+                        selectedOption = 0
+                    end
+                end
+                break
+            end
+        end
+    end
+    -- config option display
+    font:DrawStringScaledUTF8(optionQuestion[1], configPosTable[1] - 15, configPosTable[2], 1, 1, KColor(0.8, 0.2, 0.5, 1), 0, false)
+    font:DrawStringScaledUTF8(optionQuestion[2], configPosTable[1] + 150, configPosTable[2] + 9 * (#optionList + 1), 1, 1, KColor(0.8, 0.2, 0.5, 1), 0, false)
+    for i = 1, #optionList do
+        if selectOption == i then
+            font:DrawStringUTF8(optionList[i] .. "    >>", configPosTable[1], configPosTable[2] + 18 * i, KColor(0.15, 0.7, 0.7, 1), 0, false)
+        else
+            font:DrawStringUTF8(optionList[i] .. "    >>", configPosTable[1], configPosTable[2] + 18 * i, KColor(0.075, 0.35, 0.35, 1), 0, false)
+        end
+    end
+end
 
 local function elementInList(n, targetList)
     for _, v in ipairs(targetList) do
@@ -178,10 +263,13 @@ end
 local function displayTitle()
     font:DrawStringUTF8(modVersion, 275, 183, KColor(1, 1, 1, 1), 0, false)
     font:DrawStringUTF8(inputBoxText, 275, 223, KColor(1, 1, 1, 1), 0, false)
-    font:DrawStringUTF8(instuctionText1, 60, 183, KColor(1, 0.75, 0, 1), 0, false)
-    font:DrawStringUTF8(instuctionText2, 60, 203, KColor(1, 0.75, 0, 1), 0, false)
-    font:DrawStringUTF8(instuctionText3, 60, 223, KColor(1, 0.75, 0, 1), 0, false)
-    font:DrawStringUTF8(instuctionText4, 60, 243, KColor(1, 0.75, 0, 1), 0, false)
+    for i = 1, #instructionTextTable do
+        if i == #instructionTextTable then
+            font:DrawStringUTF8(instructionTextTable[i], 275, 243, KColor(1, 0.75, 0, 1), 0, false)
+        else
+            font:DrawStringUTF8(instructionTextTable[i], 60, 163 + 20 * i, KColor(1, 0.75, 0, 1), 0, false)
+        end
+    end
     font:DrawStringUTF8("当前登录用户：" .. userName, 275, 203, KColor(1, 1, 1, 1), 0, false)
 end
 
@@ -227,7 +315,7 @@ end
 local function getCurDanmu(message)
     local p = 1
     while p + 15 <= #message do
-        local packetLength, headerLength, protoVersion, packetType, _, offset = string.unpack(">I4I2I2I4I4", message,p)
+        local packetLength, headerLength, protoVersion, packetType, _, offset = string.unpack(">I4I2I2I4I4", message, p)
         local text = string.sub(message, p + 16, p + packetLength - 1)
         if protoVersion == 2 then
             getCurDanmu(zzlib.inflate(text))
@@ -242,7 +330,7 @@ local function getCurDanmu(message)
                     curDanmu[1] = messageTable.info[2]
                     curDanmu[2] = messageTable.info[3][2]
                     curDanmu[3] = ""
-                    speechTimer = 600
+                    speechTimer = configParameterTable[2][1] * 30
                     if szxDanmuji.danmuCommandOn then
                         table.insert(szxDanmuji.danmuTable, curDanmu[1])
                     end
@@ -252,20 +340,20 @@ local function getCurDanmu(message)
                 curDanmu[1] = "送出了1个红包[" .. data.price .. "金电池]"
                 curDanmu[2] = data.uname
                 curDanmu[3] = ""
-                speechTimer = 600
+                speechTimer = configParameterTable[2][1] * 30
             elseif commandType == "GUARD_BUY" then --上舰
                 local data = messageTable.data
                 local guardNameTable = {"总督", "提督", "舰长"}
                 curDanmu[1] = "开通了" .. data.num .. "个月" .. guardNameTable[data.guard_level]
                 curDanmu[2] = messageTable.data.username
                 curDanmu[3] = ""
-                speechTimer = 600
+                speechTimer = configParameterTable[2][1] * 30
             elseif commandType == "SUPER_CHAT_MESSAGE" then --醒目留言
                 local data = messageTable.data
                 curDanmu[1] = data.message .. "[醒目留言:" .. data.price .. "元]"
                 curDanmu[2] = data.user_info.uname
                 curDanmu[3] = ""
-                speechTimer = 600
+                speechTimer = configParameterTable[2][1] * 30
             elseif commandType == "SEND_GIFT" then --送礼
                 local data = messageTable.data
                 local coinTypeTable = {["gold"] = {"金电池", 0.01} , ["silver"] = {"银瓜子", 1}}
@@ -277,7 +365,7 @@ local function getCurDanmu(message)
                 curDanmu[1] = "送出了1个" .. data.giftName .. "[" .. realPrice .. coinTypeTable[data.coin_type][1] .. "]"
                 curDanmu[2] = data.uname
                 curDanmu[3] = ""
-                speechTimer = 600
+                speechTimer = configParameterTable[2][1] * 30
             end
         elseif packetType == 8 then
             -- 认证成功
@@ -305,6 +393,8 @@ local function sendInitPacket()
     local saveDataTable = {}
     saveDataTable.roomId = roomId
     saveDataTable.cookie = simpleEncrypt(cookieStr)
+    saveDataTable.textSize = configParameterTable[1][1]
+    saveDataTable.textDuration = configParameterTable[2][1]
     mod:SaveData(json.encode(saveDataTable))
 end
 
@@ -450,11 +540,13 @@ local function executeDanmuCommand(str)
             if elementInList(code:lower(), itemOrderMap) then
                 local prefix = code:sub(1, 1)
                 local subType = code:sub(2)
-                if codeCommandMapTable[prefix][2] then
-                    subType = subType + 32768
+                if codeCommandMapTable[prefix] ~= nil then
+                    if codeCommandMapTable[prefix][2] then
+                        subType = subType + 32768
+                    end
+                    local curCommand = codeCommandMapTable[prefix][1] .. subType
+                    Isaac.ExecuteCommand(curCommand)
                 end
-                local curCommand = codeCommandMapTable[prefix][1] .. subType
-                Isaac.ExecuteCommand(curCommand)
             end
         end
     end
@@ -571,6 +663,8 @@ local function updateCookieState()
             local saveDataTable = {}
             saveDataTable.roomId = roomId
             saveDataTable.cookie = simpleEncrypt(cookieStr)
+            saveDataTable.textSize = configParameterTable[1][1]
+            saveDataTable.textDuration = configParameterTable[2][1]
             mod:SaveData(json.encode(saveDataTable))
         end
     elseif cookieState == cookieStateTable.COOKIE_IS_READY then
@@ -692,7 +786,19 @@ local function getTokenAndCreateWebSocketObject(useClipboard)
     end
 end
 
+local function updatePlayerControlState(letControl)
+	local playerNum = game:GetNumPlayers()
+	for i = 0, playerNum - 1 do
+		local player = Isaac.GetPlayer(i)
+		if not letControl then
+			player.ControlsCooldown = 2
+		end
+	end
+end
+
 local function onGameStart(_, IsContinued)
+    canModifyConfig = false
+    letPlayerControl = true
     allTimerStop = false
     needAnimate = {false, false}
     szxDanmuji.danmuTable = {}
@@ -700,6 +806,7 @@ local function onGameStart(_, IsContinued)
 end
 
 local function onUpdate()
+    updatePlayerControlState(letPlayerControl)
     if not allTimerStop and speechTimer > 0 then
         speechTimer = speechTimer - 1
     end
@@ -721,6 +828,29 @@ end
 local function onRender(_)
     local isCtrlPressed = Input.IsButtonPressed(Keyboard.KEY_LEFT_CONTROL, 0)
     local isAltPressed = Input.IsButtonPressed(Keyboard.KEY_LEFT_ALT, 0)
+    if Input.IsButtonTriggered(Keyboard.KEY_B, 0) then
+        letPlayerControl = canModifyConfig
+        canModifyConfig = not canModifyConfig
+        selectedOption = 0
+        selectOption = 1
+        if not canModifyConfig then
+            local saveDataTable = {}
+            saveDataTable.roomId = roomId
+            saveDataTable.cookie = simpleEncrypt(cookieStr)
+            saveDataTable.textSize = configParameterTable[1][1]
+            saveDataTable.textDuration = configParameterTable[2][1]
+            mod:SaveData(json.encode(saveDataTable))
+        end
+    end
+    if canModifyConfig then
+        displayConfigMenu()
+        if Input.IsButtonTriggered(Keyboard.KEY_T, 0) then
+            curDanmu[1] = "这是一条测试弹幕"
+            curDanmu[2] = "用户名123"
+            curDanmu[3] = ""
+            speechTimer = configParameterTable[2][1] * 30
+        end
+    end
     if isAltPressed and Input.IsButtonTriggered(Keyboard.KEY_X, 0) then
         szxDanmuji.danmuCommandOn = not szxDanmuji.danmuCommandOn
         if szxDanmuji.danmuCommandOn then
@@ -748,6 +878,8 @@ local function onRender(_)
             if roomId ~= "" then
                 saveDataTable.roomId = roomId
             end
+            saveDataTable.textSize = configParameterTable[1][1]
+            saveDataTable.textDuration = configParameterTable[2][1]
             mod:SaveData(json.encode(saveDataTable))
         end
         if ws ~= nil then
@@ -797,6 +929,8 @@ local function onRender(_)
         inputBoxText = "请黏贴直播间号：[LCtrl + v]"
         local saveDataTable = {}
         saveDataTable.cookie = simpleEncrypt(cookieStr)
+        saveDataTable.textSize = configParameterTable[1][1]
+        saveDataTable.textDuration = configParameterTable[2][1]
         mod:SaveData(json.encode(saveDataTable))
         danmujiOn = true
         cookieState = cookieStateTable.INIT
@@ -858,19 +992,20 @@ local function onRender(_)
         if room:IsMirrorWorld() then
             pos.X = Isaac.GetScreenWidth() - pos.X
         end
+        local scaleCoef = configParameterTable[1][1] / configParameterTable[1][6]
         if curDanmu[1] ~= "" then 
-            font:DrawStringUTF8(curDanmu[1], pos.X - font:GetStringWidthUTF8(curDanmu[1]) / 2, pos.Y - 36 * player.SpriteScale.Y - 8 - font:GetLineHeight(), KColor(1, 1, 1, 1), 0, false)
+            font:DrawStringScaledUTF8(curDanmu[1], pos.X - scaleCoef * font:GetStringWidthUTF8(curDanmu[1]) / 2, pos.Y - 36 * player.SpriteScale.Y - 8 - scaleCoef * font:GetLineHeight(), scaleCoef, scaleCoef, KColor(1, 1, 1, 1), 0, false)
         end
         if curDanmu[2] ~= "" then
-            font:DrawStringUTF8(curDanmu[2], pos.X - font:GetStringWidthUTF8(curDanmu[2]) / 2, pos.Y + 16 - font:GetLineHeight(), KColor(1, 0.75, 0, 1), 0, false)
+            font:DrawStringScaledUTF8(curDanmu[2], pos.X - scaleCoef * font:GetStringWidthUTF8(curDanmu[2]) / 2, pos.Y + 4 * player.SpriteScale.Y, scaleCoef, scaleCoef, KColor(1, 0.75, 0, 1), 0, false)
         end
         if curDanmu[3] ~= "" then
             if curDanmu[3][2] == 1 then
-                font:DrawStringUTF8(curDanmu[3][1], pos.X - font:GetStringWidthUTF8(curDanmu[3][1]) / 2, pos.Y + 16 - font:GetLineHeight(), KColor(0.8, 0.1, 0.1, 1), 0, false)
+                font:DrawStringScaledUTF8(curDanmu[3][1], pos.X - scaleCoef * font:GetStringWidthUTF8(curDanmu[3][1]) / 2, pos.Y + 4 * player.SpriteScale.Y, scaleCoef, scaleCoef, KColor(0.8, 0.1, 0.1, 1), 0, false)
             elseif curDanmu[3][2] == 2 then
-                font:DrawStringUTF8(curDanmu[3][1], pos.X - font:GetStringWidthUTF8(curDanmu[3][1]) / 2, pos.Y + 16 - font:GetLineHeight(), KColor(0.1, 0.8, 0.1, 1), 0, false)
+                font:DrawStringScaledUTF8(curDanmu[3][1], pos.X - scaleCoef * font:GetStringWidthUTF8(curDanmu[3][1]) / 2, pos.Y + 4 * player.SpriteScale.Y, scaleCoef, scaleCoef, KColor(0.1, 0.8, 0.1, 1), 0, false)
             elseif curDanmu[3][2] == 3 then
-                font:DrawStringUTF8(curDanmu[3][1], pos.X - font:GetStringWidthUTF8(curDanmu[3][1]) / 2, pos.Y + 16 - font:GetLineHeight(), KColor(1, 0.75, 0, 1), 0, false)
+                font:DrawStringScaledUTF8(curDanmu[3][1], pos.X - scaleCoef * font:GetStringWidthUTF8(curDanmu[3][1]) / 2, pos.Y + 4 * player.SpriteScale.Y, scaleCoef, scaleCoef, KColor(1, 0.75, 0, 1), 0, false)
             end
         end
     end
