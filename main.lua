@@ -17,17 +17,17 @@ local function loadFont()
 	local _, err = pcall(require, "")
 	local _, basePathStart = string.find(err, "no file '", 1)
 	local _, modPathStart = string.find(err, "no file '", basePathStart)
-	local modPathEnd, _ = string.find(err, "mods", modPathStart)
+	local modPathEnd, _ = string.find(err, ".lua", modPathStart)
 	local path = string.sub(err, modPathStart + 1, modPathEnd - 1)
 	path = string.gsub(path, "\\", "/")
 	path = string.gsub(path, "//", "/")
 	path = string.gsub(path, ":/", ":\\")
-	font:Load(path .. "mods/szx_bili_danmuji_3034585714/resources/font/cjk/lanapixel.fnt")
+	font:Load(path .. "resources/font/cjk/lanapixel.fnt")
 end
 loadFont()
 
 -- text variables
-local modVersion = "三只熊弹幕姬v1.7"
+local modVersion = "三只熊弹幕姬v1.8"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instructionTextTable = {
     "按 [LCtrl + u] 重置登录账户",
@@ -63,6 +63,8 @@ local timer = 0
 local roomLatencyTimer = 0
 local needAnimate = {}
 local allTimerStop = false
+local needClearFlag = nil
+local needClearFlagEntityPickup = nil
 
 --danmu variables
 local curDanmu = {"", "", ""}
@@ -545,7 +547,13 @@ local function executeDanmuCommand(str)
                         subType = subType + 32768
                     end
                     local curCommand = codeCommandMapTable[prefix][1] .. subType
+                    needClearFlag = true
                     Isaac.ExecuteCommand(curCommand)
+                    needClearFlag = nil
+                    if needClearFlagEntityPickup then
+                        needClearFlagEntityPickup:ClearEntityFlags(EntityFlag.FLAG_ITEM_SHOULD_DUPLICATE)
+                        needClearFlagEntityPickup = nil
+                    end
                 end
             end
         end
@@ -796,6 +804,12 @@ local function updatePlayerControlState(letControl)
 	end
 end
 
+local function onPostPickupInit(_, entityPickup)
+    if needClearFlag then
+        needClearFlagEntityPickup = entityPickup
+    end
+end
+
 local function onGameStart(_, IsContinued)
     canModifyConfig = false
     letPlayerControl = true
@@ -1014,6 +1028,7 @@ local function onRender(_)
     end
 end
 
+mod:AddCallback(ModCallbacks.MC_POST_PICKUP_INIT, onPostPickupInit)
 mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, onGameStart)
 mod:AddCallback(ModCallbacks.MC_POST_UPDATE, onUpdate)
 mod:AddCallback(ModCallbacks.MC_POST_RENDER, onRender)
