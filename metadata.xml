@@ -27,6 +27,9 @@
 
 更新日志：
 
+v1.9更新：
+-适配最新的IsaacSocket连接工具
+
 v1.8更新：
 -现在弹幕互动生成道具不会受到达摩剑的影响而生成两个道具
 
@@ -63,7 +66,7 @@ v1.1更新：
 -更改了用户名显示的文本颜色为金色
 -修复了部分用户名无法显示或者显示为nil的问题
 -修复了重置连接可能出现的衔接问题</description>
-    <version>1.11</version>
+    <version>1.12</version>
     <visibility>Public</visibility>
     <tag id="Lua"/>
     <tag id="Graphics"/>

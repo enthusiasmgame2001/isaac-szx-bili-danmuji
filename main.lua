@@ -27,7 +27,7 @@ end
 loadFont()
 
 -- text variables
-local modVersion = "三只熊弹幕姬v1.8"
+local modVersion = "三只熊弹幕姬v1.9"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instructionTextTable = {
     "按 [LCtrl + u] 重置登录账户",
@@ -415,7 +415,7 @@ local function sendHeartBeatPacket()
 end
 
 local function closeWebSocket()
-    if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
+    if IsaacSocket ~= nil then
         ws.Close(1000, "Normal Closure")
         curDanmu[1] = ""
         curDanmu[2] = ""
@@ -428,7 +428,7 @@ local function closeWebSocket()
 end
 
 local function CallbackOnOpen()
-    if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
+    if IsaacSocket ~= nil then
         if ws ~= nil then
             sendInitPacket()
             sequence = sequence + 1
@@ -706,13 +706,13 @@ end
 
 local function getTokenAndCreateWebSocketObject(useClipboard)
     if ws == nil then     
-        if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
+        if IsaacSocket ~= nil then
             if useClipboard then
-                local pasteText = IsaacSocket.Clipboard.GetClipboard()
-                if #pasteText == 0 then
+                local pasteText = IsaacSocket.System.GetClipboard()
+                if pasteText == nil or #pasteText == 0 then
                     curDanmu[1] = ""
                     curDanmu[2] = ""
-                    curDanmu[3] = {"剪贴板为空", 1}
+                    curDanmu[3] = {"剪贴板为空或非纯文本", 1}
                     speechTimer = 150
                     return
                 else
@@ -982,7 +982,7 @@ local function onRender(_)
         qrRequestTimer = 0
     end
     if timer == 900 then
-        if IsaacSocket ~= nil and IsaacSocket.IsConnected() then
+        if IsaacSocket ~= nil then
             if ws ~= nil then
                 sendHeartBeatPacket()
                 sequence = sequence + 1
