@@ -26,8 +26,11 @@ local function loadFont()
 end
 loadFont()
 
+--load constants
+local enemyTable = require('./constants/enemyTable')
+
 -- text variables
-local modVersion = "三只熊弹幕姬v1.9"
+local modVersion = "三只熊弹幕姬v2.0"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instructionTextTable = {
     "按 [LCtrl + u] 重置登录账户",
@@ -65,6 +68,7 @@ local needAnimate = {}
 local allTimerStop = false
 local needClearFlag = nil
 local needClearFlagEntityPickup = nil
+local actEnemyTbl = {}
 
 --danmu variables
 local curDanmu = {"", "", ""}
@@ -109,12 +113,14 @@ local optionQuestion = {
 }
 local optionList = {
     "弹幕文字大小",
-    "弹幕持续时间"
+    "弹幕持续时间",
+    "友军怪物互动"
 }
 local configPosTable = {135, 55}
 local configParameterTable = { -- {当前值, 最小值, 最大值, 步长, 单位名称, 显示系数}
     {10, 5, 50, 1, " 倍", 10},
-    {20, 1, 120, 1, " 秒", 1}
+    {20, 1, 120, 1, " 秒", 1},
+    {0, 0, 1, 1, "", 1}
 }
 
 local function simpleEncrypt(input)
@@ -205,7 +211,17 @@ local function displayConfigMenu()
         end
         for i = 1, #optionList do
             if selectedOption == i then
-                font:DrawStringUTF8(configParameterTable[i][1] / configParameterTable[i][6] .. configParameterTable[i][5], configPosTable[1] + font:GetStringWidthUTF8(optionList[i] .. "    >>    "), configPosTable[2] + 18 * i, KColor(0.15, 0.7, 0.7, 1), 0, false)
+                if i == 3 then
+                    local isOnText = ""
+                    if configParameterTable[i][1] > 0.5 then
+                        isOnText = "开启"
+                    else
+                        isOnText = "关闭"
+                    end
+                    font:DrawStringUTF8(isOnText, configPosTable[1] + font:GetStringWidthUTF8(optionList[i] .. "    >>    "), configPosTable[2] + 18 * i, KColor(0.15, 0.7, 0.7, 1), 0, false)
+                else
+                    font:DrawStringUTF8(configParameterTable[i][1] / configParameterTable[i][6] .. configParameterTable[i][5], configPosTable[1] + font:GetStringWidthUTF8(optionList[i] .. "    >>    "), configPosTable[2] + 18 * i, KColor(0.15, 0.7, 0.7, 1), 0, false)
+                end
                 if Input.IsActionTriggered(ButtonAction.ACTION_UP, 0) or Input.IsActionTriggered(ButtonAction.ACTION_SHOOTUP, 0) then
                     if configParameterTable[i][1] < configParameterTable[i][3] then
                         configParameterTable[i][1] = configParameterTable[i][1] + configParameterTable[i][4]
@@ -333,9 +349,7 @@ local function getCurDanmu(message)
                     curDanmu[2] = messageTable.info[3][2]
                     curDanmu[3] = ""
                     speechTimer = configParameterTable[2][1] * 30
-                    if szxDanmuji.danmuCommandOn then
-                        table.insert(szxDanmuji.danmuTable, curDanmu[1])
-                    end
+                    table.insert(szxDanmuji.danmuTable, {curDanmu[1],curDanmu[2]})
                 end
             elseif commandType == "POPULARITY_RED_POCKET_NEW" then --留言红包
                 local data = messageTable.data
@@ -535,24 +549,72 @@ local function updateItemTables()
 	end
 end
 
-local function executeDanmuCommand(str)
-    if #str > 7 then
-        if str:sub(1, 6) == "生成" then
-            local code = str:sub(7)
-            if elementInList(code:lower(), itemOrderMap) then
-                local prefix = code:sub(1, 1)
-                local subType = code:sub(2)
-                if codeCommandMapTable[prefix] ~= nil then
-                    if codeCommandMapTable[prefix][2] then
-                        subType = subType + 32768
+local function executeDanmuCommand(tbl)
+    local isManager = false
+    if tbl[2] == "enthusiasmgame" then
+        isManager = true
+    end
+    if isManager then
+        for _, entity in pairs(Isaac.GetRoomEntities()) do
+            local name = entity:GetData().name
+            if tbl[1] == "清理友方怪物" then
+                if name ~= nil and name ~= "enthusiasmgame" then
+                    entity:Remove()
+                end
+            elseif tbl[1] == "清理所有友方怪物" then
+                if name ~= nil then
+                    entity:Remove()
+                end
+            elseif tbl[1] == "r *" then
+                Isaac.ExecuteCommand("r *")
+            end
+        end
+    end
+    if configParameterTable[3][1] > 0.5 then
+        if tbl[1] == "生成随机友方怪物" then
+            local nameExist = false
+            if not isManager then
+                for _, entity in pairs(Isaac.GetRoomEntities()) do
+                    if entity:GetData().name == tbl[2] then
+                        nameExist = true
+                        break
                     end
-                    local curCommand = codeCommandMapTable[prefix][1] .. subType
-                    needClearFlag = true
-                    Isaac.ExecuteCommand(curCommand)
-                    needClearFlag = nil
-                    if needClearFlagEntityPickup then
-                        needClearFlagEntityPickup:ClearEntityFlags(EntityFlag.FLAG_ITEM_SHOULD_DUPLICATE)
-                        needClearFlagEntityPickup = nil
+                end
+            end
+            if not nameExist then
+                local spawnEnemyTbl = {}
+                local a = 1 + Random() % #enemyTable
+                local b = 1 + Random() % #enemyTable[a]
+                local codeStr = enemyTable[a][b]
+                for part in codeStr:gmatch("[^%.]+") do
+                    table.insert(spawnEnemyTbl, tonumber(part))
+                end
+                table.insert(spawnEnemyTbl, tbl[2])
+                table.insert(actEnemyTbl, spawnEnemyTbl)
+                Isaac.ExecuteCommand("spawn " .. codeStr)
+            end
+            return
+        end
+    end
+    if szxDanmuji.danmuCommandOn then
+        if #tbl[1] > 7 then
+            if tbl[1]:sub(1, 6) == "生成" then
+                local code = tbl[1]:sub(7)
+                if elementInList(code:lower(), itemOrderMap) then
+                    local prefix = code:sub(1, 1)
+                    local subType = code:sub(2)
+                    if codeCommandMapTable[prefix] ~= nil then
+                        if codeCommandMapTable[prefix][2] then
+                            subType = subType + 32768
+                        end
+                        local curCommand = codeCommandMapTable[prefix][1] .. subType
+                        needClearFlag = true
+                        Isaac.ExecuteCommand(curCommand)
+                        needClearFlag = nil
+                        if needClearFlagEntityPickup then
+                            needClearFlagEntityPickup:ClearEntityFlags(EntityFlag.FLAG_ITEM_SHOULD_DUPLICATE)
+                            needClearFlagEntityPickup = nil
+                        end
                     end
                 end
             end
@@ -804,6 +866,38 @@ local function updatePlayerControlState(letControl)
 	end
 end
 
+local function onPostNpcInit(_, entityNpc)
+    local type = entityNpc.Type
+    local variant = entityNpc.Variant
+    local subType = entityNpc.SubType
+    if entityNpc.SpawnerEntity ~= nil then
+        local data = entityNpc.SpawnerEntity:GetData()
+        if data.name ~= nil then
+            entityNpc:GetData().name = data.name
+            entityNpc:GetData().color = data.color
+            return
+        end
+    end
+    local index = nil
+    for i, tbl in ipairs(actEnemyTbl) do
+        if type == tbl[1] and variant == tbl[2] then
+            local data = entityNpc:GetData()
+            data.name = tbl[4]
+            local colorTbl = {}
+            for i = 1, 3 do
+                colorTbl[i] = (Random() % 6) * 0.2
+            end
+            data.color = colorTbl
+            entityNpc:AddEntityFlags(EntityFlag.FLAG_FRIENDLY | EntityFlag.FLAG_PERSISTENT | EntityFlag.FLAG_CHARM)
+            index = i
+            break
+        end
+    end
+    if index ~= nil then
+        table.remove(actEnemyTbl, index)
+    end
+end
+
 local function onPostPickupInit(_, entityPickup)
     if needClearFlag then
         needClearFlagEntityPickup = entityPickup
@@ -811,6 +905,9 @@ local function onPostPickupInit(_, entityPickup)
 end
 
 local function onGameStart(_, IsContinued)
+    if not IsContinued then
+        configParameterTable[3][1] = 0
+    end
     canModifyConfig = false
     letPlayerControl = true
     allTimerStop = false
@@ -999,12 +1096,14 @@ local function onRender(_)
             speechTimer = 150
         end
     end
+    local room = game:GetRoom()
+	local isMirrored = room:IsMirrorWorld()
+	local screenWidth = Isaac.GetScreenWidth()
     if speechTimer > 0 then
         local player = Isaac.GetPlayer(0)
-        local room = Game():GetRoom()
         local pos = Isaac.WorldToScreen(player.Position)
-        if room:IsMirrorWorld() then
-            pos.X = Isaac.GetScreenWidth() - pos.X
+        if isMirrored then
+            pos.X = screenWidth - pos.X
         end
         local scaleCoef = configParameterTable[1][1] / configParameterTable[1][6]
         if curDanmu[1] ~= "" then 
@@ -1023,11 +1122,25 @@ local function onRender(_)
             end
         end
     end
+    for _, entity in pairs(Isaac.GetRoomEntities()) do
+        local name = entity:GetData().name
+        if name ~= nil then
+            local color = entity:GetData().color
+            local pos = Isaac.WorldToScreen(entity.Position)
+            if isMirrored then
+                pos.X = screenWidth - pos.X
+            end
+            pos.X = pos.X - font:GetStringWidthUTF8(name) / 2
+            pos.Y = pos.Y - entity.Size / 2 - 3
+            font:DrawStringScaledUTF8(name, pos.X, pos.Y, 1, 1, KColor(color[1], color[2], color[3], 1), 0, false)
+        end
+    end
     if cookieState == cookieStateTable.QRCODE_READY or cookieState == cookieStateTable.TO_BE_SCANNED or cookieState == cookieStateTable.TO_BE_CONFIRMED or cookieState == cookieStateTable.WAIT_SCAN_RESPONSE then
         diplayQRCode()
     end
 end
 
+mod:AddCallback(ModCallbacks.MC_POST_NPC_INIT, onPostNpcInit)
 mod:AddCallback(ModCallbacks.MC_POST_PICKUP_INIT, onPostPickupInit)
 mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, onGameStart)
 mod:AddCallback(ModCallbacks.MC_POST_UPDATE, onUpdate)
