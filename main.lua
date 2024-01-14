@@ -26,7 +26,8 @@ end
 loadFont()
 
 --load constants
-local enemyTable = require('./constants/enemyTable')
+local npcTable = require('./constants/npcTable')
+local bossTable = require('./constants/bossTable')
 
 -- text variables
 local modVersion = "三只熊弹幕姬v2.1"
@@ -416,7 +417,7 @@ end
 
 local function sendInitPacket()
     local headerSequenceBytes = getSequenceBytes(sequence)
-    local header = initHeader12:sub(1,3) .. string.char(46 + #initUidValue + #initRoomIdValue + #initToken) .. initHeader12:sub(5) .. headerSequenceBytes
+    local header = initHeader12:sub(1, 3) .. string.char(46 + #initUidValue + #initRoomIdValue + #initToken) .. initHeader12:sub(5) .. headerSequenceBytes
     local packet = header .. initUidKey .. initUidValue .. initRoomIdKey .. initRoomIdValue .. initProtoVersion .. initToken
     ws.Send(packet, true)
     curDanmu[1] = ""
@@ -628,10 +629,14 @@ local function executeDanmuCommand(tbl)
                     end
                 end
                 if not nameExist then
+                    local targetTable = npcTable
+                    if Random() % 11 == 0 then
+                        targetTable = bossTable
+                    end
                     local spawnEnemyTbl = {}
-                    local a = 1 + Random() % #enemyTable
-                    local b = 1 + Random() % #enemyTable[a]
-                    local codeStr = enemyTable[a][b]
+                    local a = 1 + Random() % #targetTable
+                    local b = 1 + Random() % #targetTable[a]
+                    local codeStr = targetTable[a][b]
                     for part in codeStr:gmatch("[^%.]+") do
                         table.insert(spawnEnemyTbl, tonumber(part))
                     end
@@ -989,29 +994,6 @@ local function onUpdate()
 end
 
 local function onRender(_)
-    if Input.IsButtonTriggered(Keyboard.KEY_KP_0, 0) or Input.IsButtonTriggered(Keyboard.KEY_KP_1, 0) or Input.IsButtonTriggered(Keyboard.KEY_KP_2, 0) or Input.IsButtonTriggered(Keyboard.KEY_KP_3, 0) or Input.IsButtonTriggered(Keyboard.KEY_KP_4, 0) then
-        local tempAccess = nil
-        if Input.IsButtonTriggered(Keyboard.KEY_KP_0, 0) then
-            tempAccess = accessLevel.BYOU
-        elseif Input.IsButtonTriggered(Keyboard.KEY_KP_1, 0) then
-            tempAccess = accessLevel.FANS
-        elseif Input.IsButtonTriggered(Keyboard.KEY_KP_2, 0) then
-            tempAccess = accessLevel.GUARD
-        elseif Input.IsButtonTriggered(Keyboard.KEY_KP_3, 0) then
-            tempAccess = accessLevel.MANAGER
-        elseif Input.IsButtonTriggered(Keyboard.KEY_KP_4, 0) then
-            tempAccess = accessLevel.AUTHOR
-        end
-        local userName = ""
-        for i = 1, 8 do
-            userName = userName .. Random() % 10
-        end
-        curDanmu[1] = "生成随机友方怪物"
-        curDanmu[2] = userName
-        curDanmu[3] = ""
-        speechTimer = configParameterTable[2][1] * 30
-        table.insert(szxDanmuji.danmuTable, {curDanmu[1], curDanmu[2], tempAccess})
-    end
     local isCtrlPressed = Input.IsButtonPressed(Keyboard.KEY_LEFT_CONTROL, 0)
     if Input.IsButtonTriggered(Keyboard.KEY_B, 0) then
         letPlayerControl = canModifyConfig
