@@ -1,7 +1,6 @@
 -- global variables
 szxDanmuji = {}
 szxDanmuji.danmuTable = {}
-szxDanmuji.danmuCommandOn = false
 
 -- import the zzlib library
 local zzlib = require("zzlib")
@@ -30,13 +29,12 @@ loadFont()
 local enemyTable = require('./constants/enemyTable')
 
 -- text variables
-local modVersion = "三只熊弹幕姬v2.0"
+local modVersion = "三只熊弹幕姬v2.1"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instructionTextTable = {
     "按 [LCtrl + u] 重置登录账户",
     "按 [LCtrl + z] 重置直播间号",
     "按 [LCtrl + x] 开关弹幕姬",
-    "按 [LAlt + x] 开关弹幕互动",
     "按 [B] 打开设置菜单"
 }
 
@@ -74,6 +72,13 @@ local actEnemyTbl = {}
 local curDanmu = {"", "", ""}
 local speechTimer = 0
 local roomId = ""
+local accessLevel = {
+    BYOU = 0,
+    FANS = 1,
+    GUARD = 2,
+    MANAGER = 3,
+    AUTHOR = 4
+}
 
 --QR code variables
 local spriteQRCodeTable = {}
@@ -114,12 +119,14 @@ local optionQuestion = {
 local optionList = {
     "弹幕文字大小",
     "弹幕持续时间",
-    "友军怪物互动"
+    "生成指令互动",
+    "友方怪物互动"
 }
 local configPosTable = {135, 55}
 local configParameterTable = { -- {当前值, 最小值, 最大值, 步长, 单位名称, 显示系数}
     {10, 5, 50, 1, " 倍", 10},
     {20, 1, 120, 1, " 秒", 1},
+    {0, 0, 1, 1, "", 1},
     {0, 0, 1, 1, "", 1}
 }
 
@@ -211,7 +218,7 @@ local function displayConfigMenu()
         end
         for i = 1, #optionList do
             if selectedOption == i then
-                if i == 3 then
+                if i == 3 or i == 4 then
                     local isOnText = ""
                     if configParameterTable[i][1] > 0.5 then
                         isOnText = "开启"
@@ -282,11 +289,7 @@ local function displayTitle()
     font:DrawStringUTF8(modVersion, 275, 183, KColor(1, 1, 1, 1), 0, false)
     font:DrawStringUTF8(inputBoxText, 275, 223, KColor(1, 1, 1, 1), 0, false)
     for i = 1, #instructionTextTable do
-        if i == #instructionTextTable then
-            font:DrawStringUTF8(instructionTextTable[i], 275, 243, KColor(1, 0.75, 0, 1), 0, false)
-        else
-            font:DrawStringUTF8(instructionTextTable[i], 60, 163 + 20 * i, KColor(1, 0.75, 0, 1), 0, false)
-        end
+        font:DrawStringUTF8(instructionTextTable[i], 60, 163 + 20 * i, KColor(1, 0.75, 0, 1), 0, false)
     end
     font:DrawStringUTF8("当前登录用户：" .. userName, 275, 203, KColor(1, 1, 1, 1), 0, false)
 end
@@ -349,7 +352,20 @@ local function getCurDanmu(message)
                     curDanmu[2] = messageTable.info[3][2]
                     curDanmu[3] = ""
                     speechTimer = configParameterTable[2][1] * 30
-                    table.insert(szxDanmuji.danmuTable, {curDanmu[1],curDanmu[2]})
+                    local curAccessLevel = accessLevel.BYOU
+                    if messageTable.info[4][4] ~= nil and tostring(messageTable.info[4][4]) == roomId then
+                        curAccessLevel = accessLevel.FANS
+                    end
+                    if messageTable.info[8] ~= 0 then
+                        curAccessLevel = accessLevel.GUARD
+                    end
+                    if messageTable.info[3][3] == 1 then
+                        curAccessLevel = accessLevel.MANAGER
+                    end
+                    if curDanmu[2] == "enthusiasmgame" then
+                        curAccessLevel = accessLevel.AUTHOR
+                    end
+                    table.insert(szxDanmuji.danmuTable, {curDanmu[1], curDanmu[2], curAccessLevel})
                 end
             elseif commandType == "POPULARITY_RED_POCKET_NEW" then --留言红包
                 local data = messageTable.data
@@ -550,70 +566,103 @@ local function updateItemTables()
 end
 
 local function executeDanmuCommand(tbl)
-    local isManager = false
-    if tbl[2] == "enthusiasmgame" then
-        isManager = true
-    end
-    if isManager then
-        for _, entity in pairs(Isaac.GetRoomEntities()) do
-            local name = entity:GetData().name
-            if tbl[1] == "清理友方怪物" then
+    --manager access
+    if tbl[3] >= accessLevel.MANAGER then
+        if tbl[1] == "清理怪物" then
+            for _, entity in pairs(Isaac.GetRoomEntities()) do
+                local name = entity:GetData().name
                 if name ~= nil and name ~= "enthusiasmgame" then
                     entity:Remove()
                 end
-            elseif tbl[1] == "清理所有友方怪物" then
-                if name ~= nil then
-                    entity:Remove()
+            end
+        end
+        if tbl[3] == accessLevel.AUTHOR then
+            if tbl[1] == "清理所有怪物" then
+                for _, entity in pairs(Isaac.GetRoomEntities()) do
+                    local name = entity:GetData().name
+                    if name ~= nil then
+                        entity:Remove()
+                    end
+                end
+            elseif tbl[1] == "清理我的怪物" then
+                for _, entity in pairs(Isaac.GetRoomEntities()) do
+                    local name = entity:GetData().name
+                    if name ~= nil and name == "enthusiasmgame" then
+                        entity:Remove()
+                    end
                 end
             elseif tbl[1] == "r *" then
                 Isaac.ExecuteCommand("r *")
             end
         end
     end
-    if configParameterTable[3][1] > 0.5 then
-        if tbl[1] == "生成随机友方怪物" then
-            local nameExist = false
-            if not isManager then
-                for _, entity in pairs(Isaac.GetRoomEntities()) do
-                    if entity:GetData().name == tbl[2] then
-                        nameExist = true
-                        break
-                    end
+    --guard access
+    if tbl[3] >= accessLevel.GUARD then
+        if tbl[1] == "化友为敌" then
+            for _, entity in pairs(Isaac.GetRoomEntities()) do
+                local name = entity:GetData().name
+                if name ~= nil and name == tbl[2] then
+                    entity:ClearEntityFlags(EntityFlag.FLAG_FRIENDLY | EntityFlag.FLAG_CHARM)
                 end
             end
-            if not nameExist then
-                local spawnEnemyTbl = {}
-                local a = 1 + Random() % #enemyTable
-                local b = 1 + Random() % #enemyTable[a]
-                local codeStr = enemyTable[a][b]
-                for part in codeStr:gmatch("[^%.]+") do
-                    table.insert(spawnEnemyTbl, tonumber(part))
+        elseif tbl[1] == "化敌为友" then
+            for _, entity in pairs(Isaac.GetRoomEntities()) do
+                local name = entity:GetData().name
+                if name ~= nil and name == tbl[2] then
+                    entity:AddEntityFlags(EntityFlag.FLAG_FRIENDLY | EntityFlag.FLAG_PERSISTENT | EntityFlag.FLAG_CHARM)
                 end
-                table.insert(spawnEnemyTbl, tbl[2])
-                table.insert(actEnemyTbl, spawnEnemyTbl)
-                Isaac.ExecuteCommand("spawn " .. codeStr)
             end
-            return
         end
     end
-    if szxDanmuji.danmuCommandOn then
-        if #tbl[1] > 7 then
-            if tbl[1]:sub(1, 6) == "生成" then
-                local code = tbl[1]:sub(7)
-                if elementInList(code:lower(), itemOrderMap) then
-                    local prefix = code:sub(1, 1)
-                    local subType = code:sub(2)
-                    if codeCommandMapTable[prefix] ~= nil then
-                        if codeCommandMapTable[prefix][2] then
-                            subType = subType + 32768
+    --fans access
+    if configParameterTable[4][1] > 0.5 then
+        if tbl[3] >= accessLevel.FANS then
+            if tbl[1] == "生成随机友方怪物" then
+                local nameExist = false
+                if tbl[3] ~= accessLevel.AUTHOR then
+                    for _, entity in pairs(Isaac.GetRoomEntities()) do
+                        if entity:GetData().name == tbl[2] then
+                            nameExist = true
+                            break
                         end
-                        local curCommand = codeCommandMapTable[prefix][1] .. subType
-                        needClearFlag = true
-                        Isaac.ExecuteCommand(curCommand)
-                        needClearFlag = nil
-                        if needClearFlagEntityPickup then
-                            needClearFlagEntityPickup:ClearEntityFlags(EntityFlag.FLAG_ITEM_SHOULD_DUPLICATE)
-                            needClearFlagEntityPickup = nil
+                    end
+                end
+                if not nameExist then
+                    local spawnEnemyTbl = {}
+                    local a = 1 + Random() % #enemyTable
+                    local b = 1 + Random() % #enemyTable[a]
+                    local codeStr = enemyTable[a][b]
+                    for part in codeStr:gmatch("[^%.]+") do
+                        table.insert(spawnEnemyTbl, tonumber(part))
+                    end
+                    table.insert(spawnEnemyTbl, tbl[2])
+                    table.insert(actEnemyTbl, spawnEnemyTbl)
+                    Isaac.ExecuteCommand("spawn " .. codeStr)
+                end
+                return
+            end
+        end
+    end
+    if configParameterTable[3][1] > 0.5 then
+        if tbl[3] >= accessLevel.FANS then
+            if #tbl[1] > 7 then
+                if tbl[1]:sub(1, 6) == "生成" then
+                    local code = tbl[1]:sub(7)
+                    if elementInList(code:lower(), itemOrderMap) then
+                        local prefix = code:sub(1, 1)
+                        local subType = code:sub(2)
+                        if codeCommandMapTable[prefix] ~= nil then
+                            if codeCommandMapTable[prefix][2] then
+                                subType = subType + 32768
+                            end
+                            local curCommand = codeCommandMapTable[prefix][1] .. subType
+                            needClearFlag = true
+                            Isaac.ExecuteCommand(curCommand)
+                            needClearFlag = nil
+                            if needClearFlagEntityPickup then
+                                needClearFlagEntityPickup:ClearEntityFlags(EntityFlag.FLAG_ITEM_SHOULD_DUPLICATE)
+                                needClearFlagEntityPickup = nil
+                            end
                         end
                     end
                 end
@@ -874,6 +923,7 @@ local function onPostNpcInit(_, entityNpc)
         local data = entityNpc.SpawnerEntity:GetData()
         if data.name ~= nil then
             entityNpc:GetData().name = data.name
+            entityNpc:GetData().index = data.index + 1
             entityNpc:GetData().color = data.color
             return
         end
@@ -883,6 +933,7 @@ local function onPostNpcInit(_, entityNpc)
         if type == tbl[1] and variant == tbl[2] then
             local data = entityNpc:GetData()
             data.name = tbl[4]
+            data.index = 1
             local colorTbl = {}
             for i = 1, 3 do
                 colorTbl[i] = (Random() % 6) * 0.2
@@ -907,6 +958,7 @@ end
 local function onGameStart(_, IsContinued)
     if not IsContinued then
         configParameterTable[3][1] = 0
+        configParameterTable[4][1] = 0
     end
     canModifyConfig = false
     letPlayerControl = true
@@ -937,8 +989,30 @@ local function onUpdate()
 end
 
 local function onRender(_)
+    if Input.IsButtonTriggered(Keyboard.KEY_KP_0, 0) or Input.IsButtonTriggered(Keyboard.KEY_KP_1, 0) or Input.IsButtonTriggered(Keyboard.KEY_KP_2, 0) or Input.IsButtonTriggered(Keyboard.KEY_KP_3, 0) or Input.IsButtonTriggered(Keyboard.KEY_KP_4, 0) then
+        local tempAccess = nil
+        if Input.IsButtonTriggered(Keyboard.KEY_KP_0, 0) then
+            tempAccess = accessLevel.BYOU
+        elseif Input.IsButtonTriggered(Keyboard.KEY_KP_1, 0) then
+            tempAccess = accessLevel.FANS
+        elseif Input.IsButtonTriggered(Keyboard.KEY_KP_2, 0) then
+            tempAccess = accessLevel.GUARD
+        elseif Input.IsButtonTriggered(Keyboard.KEY_KP_3, 0) then
+            tempAccess = accessLevel.MANAGER
+        elseif Input.IsButtonTriggered(Keyboard.KEY_KP_4, 0) then
+            tempAccess = accessLevel.AUTHOR
+        end
+        local userName = ""
+        for i = 1, 8 do
+            userName = userName .. Random() % 10
+        end
+        curDanmu[1] = "生成随机友方怪物"
+        curDanmu[2] = userName
+        curDanmu[3] = ""
+        speechTimer = configParameterTable[2][1] * 30
+        table.insert(szxDanmuji.danmuTable, {curDanmu[1], curDanmu[2], tempAccess})
+    end
     local isCtrlPressed = Input.IsButtonPressed(Keyboard.KEY_LEFT_CONTROL, 0)
-    local isAltPressed = Input.IsButtonPressed(Keyboard.KEY_LEFT_ALT, 0)
     if Input.IsButtonTriggered(Keyboard.KEY_B, 0) then
         letPlayerControl = canModifyConfig
         canModifyConfig = not canModifyConfig
@@ -961,21 +1035,6 @@ local function onRender(_)
             curDanmu[3] = ""
             speechTimer = configParameterTable[2][1] * 30
         end
-    end
-    if isAltPressed and Input.IsButtonTriggered(Keyboard.KEY_X, 0) then
-        szxDanmuji.danmuCommandOn = not szxDanmuji.danmuCommandOn
-        if szxDanmuji.danmuCommandOn then
-            needAnimate[1] = true
-            curDanmu[1] = "例：生成c1 生成t2 生成T3 生成k4"
-            curDanmu[2] = ""
-            curDanmu[3] = {"弹幕互动打开", 2}
-        else
-            needAnimate[2] = true
-            curDanmu[1] = ""
-            curDanmu[2] = ""
-            curDanmu[3] = {"弹幕互动关闭", 1}
-        end
-        speechTimer = 150
     end
     if isCtrlPressed and Input.IsButtonTriggered(Keyboard.KEY_U, 0) then
         if danmujiOn then
@@ -1099,6 +1158,7 @@ local function onRender(_)
     local room = game:GetRoom()
 	local isMirrored = room:IsMirrorWorld()
 	local screenWidth = Isaac.GetScreenWidth()
+    --render danmu and danmu names on player
     if speechTimer > 0 then
         local player = Isaac.GetPlayer(0)
         local pos = Isaac.WorldToScreen(player.Position)
@@ -1122,19 +1182,42 @@ local function onRender(_)
             end
         end
     end
+    --render danmu names on npc
+    local allNameNpcTbl = {}
     for _, entity in pairs(Isaac.GetRoomEntities()) do
         local name = entity:GetData().name
         if name ~= nil then
             local color = entity:GetData().color
+            local index = entity:GetData().index
             local pos = Isaac.WorldToScreen(entity.Position)
             if isMirrored then
                 pos.X = screenWidth - pos.X
             end
-            pos.X = pos.X - font:GetStringWidthUTF8(name) / 2
+            pos.X = pos.X - font:GetStringWidthUTF8(name) / 4
             pos.Y = pos.Y - entity.Size / 2 - 3
-            font:DrawStringScaledUTF8(name, pos.X, pos.Y, 1, 1, KColor(color[1], color[2], color[3], 1), 0, false)
+            if allNameNpcTbl[name] == nil then
+                allNameNpcTbl[name] = {}
+            end
+            table.insert(allNameNpcTbl[name], {index, pos.X, pos.Y, color})
         end
     end
+    for name, tbl in pairs(allNameNpcTbl) do -- tbl = {{index, pos.X, pos.Y, color},{index, pos.X, pos.Y, color},...,{index, pos.X, pos.Y, color}}
+        local minIndex = 0
+        local toBeRenderedTbl = {}
+        for k, attr in ipairs(tbl) do
+            if minIndex == 0 then
+                minIndex = attr[1]
+                toBeRenderedTbl = {name, k}
+            else
+                if attr[1] < minIndex then
+                    minIndex = attr[1]
+                    toBeRenderedTbl = {name, k}
+                end
+            end
+        end
+        font:DrawStringScaledUTF8(toBeRenderedTbl[1], allNameNpcTbl[toBeRenderedTbl[1]][toBeRenderedTbl[2]][2], allNameNpcTbl[toBeRenderedTbl[1]][toBeRenderedTbl[2]][3], 0.5, 0.5, KColor(allNameNpcTbl[toBeRenderedTbl[1]][toBeRenderedTbl[2]][4][1], allNameNpcTbl[toBeRenderedTbl[1]][toBeRenderedTbl[2]][4][2], allNameNpcTbl[toBeRenderedTbl[1]][toBeRenderedTbl[2]][4][3], 1), 0, false)
+    end
+    --render QR code
     if cookieState == cookieStateTable.QRCODE_READY or cookieState == cookieStateTable.TO_BE_SCANNED or cookieState == cookieStateTable.TO_BE_CONFIRMED or cookieState == cookieStateTable.WAIT_SCAN_RESPONSE then
         diplayQRCode()
     end
