@@ -30,7 +30,7 @@ local npcTable = require('./constants/npcTable')
 local bossTable = require('./constants/bossTable')
 
 -- text variables
-local modVersion = "三只熊弹幕姬v2.1"
+local modVersion = "三只熊弹幕姬v2.2"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instructionTextTable = {
     "按 [LCtrl + u] 重置登录账户",
@@ -603,6 +603,7 @@ local function executeDanmuCommand(tbl)
             for _, entity in pairs(Isaac.GetRoomEntities()) do
                 local name = entity:GetData().name
                 if name ~= nil and name == tbl[2] then
+                    entity:GetData().color = {0.8, 0.1, 0.1}
                     entity:ClearEntityFlags(EntityFlag.FLAG_FRIENDLY | EntityFlag.FLAG_CHARM)
                 end
             end
@@ -610,6 +611,7 @@ local function executeDanmuCommand(tbl)
             for _, entity in pairs(Isaac.GetRoomEntities()) do
                 local name = entity:GetData().name
                 if name ~= nil and name == tbl[2] then
+                    entity:GetData().color = {0.1, 0.8, 0.1}
                     entity:AddEntityFlags(EntityFlag.FLAG_FRIENDLY | EntityFlag.FLAG_PERSISTENT | EntityFlag.FLAG_CHARM)
                 end
             end
@@ -630,7 +632,7 @@ local function executeDanmuCommand(tbl)
                 end
                 if not nameExist then
                     local targetTable = npcTable
-                    if Random() % 11 == 0 then
+                    if Random() % 4 == 0 then
                         targetTable = bossTable
                     end
                     local spawnEnemyTbl = {}
@@ -939,11 +941,7 @@ local function onPostNpcInit(_, entityNpc)
             local data = entityNpc:GetData()
             data.name = tbl[4]
             data.index = 1
-            local colorTbl = {}
-            for i = 1, 3 do
-                colorTbl[i] = (Random() % 6) * 0.2
-            end
-            data.color = colorTbl
+            data.color = {0.1, 0.8, 0.1}
             entityNpc:AddEntityFlags(EntityFlag.FLAG_FRIENDLY | EntityFlag.FLAG_PERSISTENT | EntityFlag.FLAG_CHARM)
             index = i
             break
