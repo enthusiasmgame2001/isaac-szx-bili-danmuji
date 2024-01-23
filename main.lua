@@ -30,7 +30,7 @@ local npcTable = require('./constants/npcTable')
 local bossTable = require('./constants/bossTable')
 
 -- text variables
-local modVersion = "三只熊弹幕姬v2.2"
+local modVersion = "三只熊弹幕姬v2.3"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instructionTextTable = {
     "按 [LCtrl + u] 重置登录账户",
@@ -417,7 +417,8 @@ end
 
 local function sendInitPacket()
     local headerSequenceBytes = getSequenceBytes(sequence)
-    local header = initHeader12:sub(1, 3) .. string.char(46 + #initUidValue + #initRoomIdValue + #initToken) .. initHeader12:sub(5) .. headerSequenceBytes
+    local packetLengthInteger = 46 + #initUidValue + #initRoomIdValue + #initToken
+    local header = initHeader12:sub(1, 2) .. string.char((packetLengthInteger >> 8) & 0xFF, packetLengthInteger & 0xFF) .. initHeader12:sub(5) .. headerSequenceBytes
     local packet = header .. initUidKey .. initUidValue .. initRoomIdKey .. initRoomIdValue .. initProtoVersion .. initToken
     ws.Send(packet, true)
     curDanmu[1] = ""
