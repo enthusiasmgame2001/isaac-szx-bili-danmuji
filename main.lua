@@ -30,7 +30,7 @@ local npcTable = require('./constants/npcTable')
 local bossTable = require('./constants/bossTable')
 
 -- text variables
-local modVersion = "三只熊弹幕姬v2.3"
+local modVersion = "三只熊弹幕姬v2.4"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instructionTextTable = {
     "按 [LCtrl + u] 重置登录账户",
@@ -994,7 +994,7 @@ end
 
 local function onRender(_)
     local isCtrlPressed = Input.IsButtonPressed(Keyboard.KEY_LEFT_CONTROL, 0)
-    if Input.IsButtonTriggered(Keyboard.KEY_B, 0) then
+    if Input.IsButtonTriggered(Keyboard.KEY_B, 0) and IsaacSocket ~= nil and not IsaacSocket.IsaacAPI.IsConsoleOpen() and (sanzhixiong == nil or not sanzhixiong.consoleOn) then
         letPlayerControl = canModifyConfig
         canModifyConfig = not canModifyConfig
         selectedOption = 0
