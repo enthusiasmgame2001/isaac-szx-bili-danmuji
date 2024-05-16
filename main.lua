@@ -30,7 +30,7 @@ local npcTable = require('./constants/npcTable')
 local bossTable = require('./constants/bossTable')
 
 -- text variables
-local modVersion = "三只熊弹幕姬v2.4"
+local modVersion = "三只熊弹幕姬v2.5"
 local inputBoxText = "请黏贴直播间号：[LCtrl + v]"
 local instructionTextTable = {
     "按 [LCtrl + u] 重置登录账户",
@@ -82,6 +82,7 @@ local accessLevel = {
 }
 
 --QR code variables
+local qrencode = require("qrencode")
 local spriteQRCodeTable = {}
 local qRCodeSequence = {}
 local qRCodeDimension = nil
@@ -95,7 +96,7 @@ local cookieStateTable = {
     SUCCESS = 5, --扫码登录成功
     EXPIRED = 6, --二维码已失效
     TO_BE_CONFIRMED = 7, --用户已扫码，等待用户确认
-    TO_BE_SCANNED = 8, --用户未代码，等待用户扫码
+    TO_BE_SCANNED = 8, --用户未扫码，等待用户扫码
     COOKIE_IS_READY = 9, --Cookie已得到
     WAIT_USER_INFO_RESPONSE = 10, --等待获得用户信息的响应
     USER_INFO_RECEIVED = 11, --用户信息已得到
@@ -296,7 +297,6 @@ local function displayTitle()
 end
 
 local function initQRCodeSequence(qrCodeUrl)
-    local qrencode = require("qrencode.lua")
     local ok, tab_or_message = qrencode.qrcode(qrCodeUrl)
     qRCodeDimension = #tab_or_message
     if not ok then
